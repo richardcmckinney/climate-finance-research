@@ -12,6 +12,7 @@ This repository contains the complete anonymized survey data and analysis code f
 **Response Rate:** 7.3% (1,307 usable responses from 17,892 delivered invitations)
 
 ## Repository Structure
+```
 climate-finance-research/
 ├── data/                        # Anonymized survey data (safe to share)
 │   ├── survey_responses_anonymized_basic.csv     # Basic anonymized responses (N=1,563)
@@ -33,6 +34,7 @@ climate-finance-research/
 │   ├── appendix_j_classification_template.csv # Template for manual classification
 │   └── appendix_j_classifications_complete.csv # Final classifications (when available)
 └── README.md
+```
 
 ## Data Privacy and Anonymization
 
@@ -74,14 +76,19 @@ install.packages(c(
   "effectsize",  # Effect size calculations
   "broom"        # Tidy statistical outputs
 ))
+```
 
-## Step-by-Step Reproduction
+### Step-by-Step Reproduction
+
+```bash
 # 1. Clone this repository
-# git clone https://github.com/[username]/climate-finance-research.git
+git clone https://github.com/[username]/climate-finance-research.git
 
 # 2. Set working directory to project root
-setwd("climate-finance-research")
+cd climate-finance-research
+```
 
+```r
 # 3. Run anonymization (only if starting from raw data)
 # Note: Requires raw data file in data_raw/ directory
 source("R/01_anonymize_data.R")
@@ -94,43 +101,47 @@ source("R/03_generate_figures.R")
 
 # 6. Run hypothesis tests
 source("R/04_hypothesis_tests.R")
+```
 
 ## Data Files Description
-# Primary Data Files
-- survey_responses_anonymized_basic.csv - Core anonymized survey responses with all PII removed
-- survey_responses_anonymized_classified.csv - Enhanced version with Appendix J stakeholder classifications
-- data_dictionary.csv - Complete variable descriptions, types, and completeness statistics
 
-# Classification Files
-- appendix_j_methodology.md - Detailed methodology for 23-category classification system
-- appendix_j_classification_template.csv - Template for manual classification of free-text responses
-- appendix_j_classifications_complete.csv - Final manual classifications (when completed)
+### Primary Data Files
+- `survey_responses_anonymized_basic.csv` - Core anonymized survey responses with all PII removed
+- `survey_responses_anonymized_classified.csv` - Enhanced version with Appendix J stakeholder classifications
+- `data_dictionary.csv` - Complete variable descriptions, types, and completeness statistics
 
-# Statistical Methods
-- Hypothesis Testing: 12 theory-driven hypotheses tested using appropriate parametric/non-parametric tests
-- Factor Analysis: Principal Component Analysis with Varimax rotation (KMO = 0.847)
-- Effect Sizes: Cohen's d, Cramér's V, and correlation coefficients reported
-- Multiple Comparisons: Bonferroni correction applied within hypothesis families
-- Missing Data: Little's MCAR test confirmed missing completely at random (p = 0.346)
+### Classification Files
+- `appendix_j_methodology.md` - Detailed methodology for 23-category classification system
+- `appendix_j_classification_template.csv` - Template for manual classification of free-text responses
+- `appendix_j_classifications_complete.csv` - Final manual classifications (when completed)
+
+## Statistical Methods
+- **Hypothesis Testing:** 12 theory-driven hypotheses tested using appropriate parametric/non-parametric tests
+- **Factor Analysis:** Principal Component Analysis with Varimax rotation (KMO = 0.847)
+- **Effect Sizes:** Cohen's d, Cramér's V, and correlation coefficients reported
+- **Multiple Comparisons:** Bonferroni correction applied within hypothesis families
+- **Missing Data:** Little's MCAR test confirmed missing completely at random (p = 0.346)
 
 ## Citation
 If you use this data or code, please cite:
+```
 McKinney, R. (2025). The Capital-Opportunity Mismatch: A Multi-Stakeholder 
 Analysis of Investment Barriers in Climate Finance. [Journal Name], 
 [Volume], [Pages]. https://doi.org/[DOI]
+```
 
 ## License
-- Data: Creative Commons Attribution 4.0 International (CC BY 4.0)
-- Code: MIT License
+- **Data:** Creative Commons Attribution 4.0 International (CC BY 4.0)
+- **Code:** MIT License
 - See LICENSE file for details
 
 ## Ethics Statement
 This research was approved by the Central University Research Ethics Committee at the University of Oxford (Reference: SOGE C1A24102). All participants provided informed consent.
 
 ## Contact
-Richard McKinney
-Email: richardmckinney@pm.me
-ORCID: [Your ORCID if available]
+Richard McKinney  
+Email: richardmckinney@pm.me  
+ORCID: [Your ORCID if available]  
 Institution: [Your Institution]
 
 ## Acknowledgments
