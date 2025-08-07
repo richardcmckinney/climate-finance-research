@@ -1,109 +1,120 @@
-# Main Analysis Script for Climate Finance Survey
+# Main Analysis Script - Supports Both Basic and Classified Data
 # Author: Richard McKinney
 # Date: 2025-08-06
-# Purpose: Reproduce key findings from manuscript
 
 library(tidyverse)
 library(here)
 
-# Load anonymized data
-cat("Loading anonymized survey data...\n")
-survey_data <- read_csv(here("data", "climate_finance_survey_anonymized.csv"))
+# ============================================================================
+# DATA LOADING - INTELLIGENT SELECTION
+# ============================================================================
 
+cat("=== LOADING SURVEY DATA ===\n")
+
+# Check which data version to use
+if(file.exists(here("data_processed", "survey_responses_anonymized_classified.csv"))) {
+  cat("Loading fully classified data (with Appendix J classifications)...\n")
+  survey_data <- read_csv(here("data_processed", "survey_responses_anonymized_classified.csv"))
+  data_version <- "CLASSIFIED"
+} else if(file.exists(here("data_processed", "survey_responses_anonymized_preliminary.csv"))) {
+  cat("Loading preliminary classified data...\n")
+  survey_data <- read_csv(here("data_processed", "survey_responses_anonymized_preliminary.csv"))
+  data_version <- "PRELIMINARY"
+} else {
+  cat("Loading basic anonymized data...\n")
+  survey_data <- read_csv(here("data", "survey_responses_anonymized_basic.csv"))
+  data_version <- "BASIC"
+}
+
+cat("Data version:", data_version, "\n")
 cat("Loaded", nrow(survey_data), "responses\n\n")
 
 # ============================================================================
-# SAMPLE CHARACTERISTICS (Section 3.5.1 of manuscript)
+# STAKEHOLDER DISTRIBUTION ANALYSIS
 # ============================================================================
 
-# Define stakeholder groups based on Q2.1
-stakeholder_mapping <- c(
-  "1" = "Venture Capitalist",
-  "2" = "Government Funding Agency",
-  "3" = "Entrepreneur",
-  "4" = "Philanthropic Organization",
-  "5" = "Limited Partner",
-  "6" = "High Net-Worth Individual",
-  "7" = "Family Office",
-  "8" = "ESG Investor",
-  "12" = "Other"
-)
+if("stakeholder_category" %in% names(survey_data)) {
+  # Use Appendix J classifications if available
+  cat("=== STAKEHOLDER DISTRIBUTION (Appendix J Classification) ===\n")
 
-# Count respondents by stakeholder type
-stakeholder_distribution <- survey_data %>%
-  filter(!is.na(Q2.1)) %>%
-  mutate(
-    stakeholder_type = stakeholder_mapping[as.character(Q2.1)]
-  ) %>%
-  filter(!is.na(stakeholder_type)) %>%
-  count(stakeholder_type, name = "n_respondents") %>%
-  mutate(
-    percentage = round(n_respondents / sum(n_respondents) * 100, 1)
-  ) %>%
-  arrange(desc(n_respondents))
+  stakeholder_distribution <- survey_data %>%
+    filter(!is.na(stakeholder_category)) %>%
+    count(stakeholder_category, name = "n_respondents") %>%
+    mutate(
+      percentage = round(n_respondents / sum(n_respondents) * 100, 1)
+    ) %>%
+    arrange(desc(n_respondents))
 
-cat("=== STAKEHOLDER DISTRIBUTION ===\n")
-print(stakeholder_distribution)
-cat("\nTotal categorized respondents:", sum(stakeholder_distribution$n_respondents), "\n")
+} else {
+  # Fallback to basic Q2.1 analysis
+  cat("=== STAKEHOLDER DISTRIBUTION (Basic Classification) ===\n")
 
-# Geographic distribution (Q2.2)
-geographic_distribution <- survey_data %>%
-  filter(!is.na(Q2.2)) %>%
-  count(Q2.2) %>%
-  mutate(
-    region = case_when(
-      Q2.2 == "1" ~ "North America",
-      Q2.2 == "2" ~ "Europe",
-      Q2.2 == "3" ~ "Asia",
-      Q2.2 == "4" ~ "Other",
-      TRUE ~ "Unspecified"
-    )
-  ) %>%
-  group_by(region) %>%
-  summarise(n = sum(n)) %>%
-  mutate(percentage = round(n / sum(n) * 100, 1))
-
-cat("\n=== GEOGRAPHIC DISTRIBUTION ===\n")
-print(geographic_distribution)
-
-# ============================================================================
-# KEY FINDINGS - Capital-Opportunity Mismatch
-# ============================================================================
-
-# Analyze barriers by stakeholder type (Q3.11 - multiple choice)
-# Note: These are placeholder column names - adjust based on actual survey structure
-
-cat("\n=== BARRIER ANALYSIS ===\n")
-
-# Count how many respondents completed barrier questions
-barrier_cols <- names(survey_data)[grepl("Q3.11", names(survey_data))]
-if(length(barrier_cols) > 0) {
-  barrier_completion <- survey_data %>%
-    select(all_of(barrier_cols)) %>%
-    mutate(any_barrier_selected = rowSums(!is.na(.)) > 0) %>%
-    summarise(
-      n_with_barriers = sum(any_barrier_selected, na.rm = TRUE),
-      pct_with_barriers = round(mean(any_barrier_selected, na.rm = TRUE) * 100, 1)
-    )
-
-  cat("Respondents who selected at least one barrier:",
-      barrier_completion$n_with_barriers,
-      "(", barrier_completion$pct_with_barriers, "%)\n")
+  stakeholder_distribution <- survey_data %>%
+    filter(!is.na(Q2.1) &
+             Q2.1 != "{\"ImportId\":\"QID174\"}" &
+             Q2.1 != "Which of the following best describes your role? (Please select the most appropriate option) - Selected Choice") %>%
+    mutate(
+      stakeholder_category = case_when(
+        grepl("Venture Capital", Q2.1) ~ "Venture Capital Firm",
+        Q2.1 == "Entrepreneur in Climate Technology" ~ "Entrepreneur in Climate Technology",
+        Q2.1 == "Government Funding Agency" ~ "Government Funding Agency",
+        # ... other mappings
+        Q2.1 == "Other (please specify)" ~ "Other/Unclassified",
+        TRUE ~ "Other"
+      )
+    ) %>%
+    count(stakeholder_category, name = "n_respondents") %>%
+    mutate(
+      percentage = round(n_respondents / sum(n_respondents) * 100, 1)
+    ) %>%
+    arrange(desc(n_respondents))
 }
 
-# Save results
-cat("\n=== SAVING RESULTS ===\n")
+print(stakeholder_distribution)
+cat("\nTotal categorized:", sum(stakeholder_distribution$n_respondents), "\n")
+
+# ============================================================================
+# KEY MANUSCRIPT GROUPS (Section 3.5.1)
+# ============================================================================
+
+# Define manuscript's key groups
+manuscript_key_groups <- c(
+  "Venture Capital Firm",
+  "Government Funding Agency",
+  "Entrepreneur in Climate Technology",
+  "Philanthropic Organization",
+  "Limited Partner",
+  "High Net-Worth Individual",
+  "Family Office",
+  "ESG Investor"
+)
+
+manuscript_distribution <- stakeholder_distribution %>%
+  filter(stakeholder_category %in% manuscript_key_groups)
+
+cat("\n=== KEY MANUSCRIPT STAKEHOLDER GROUPS ===\n")
+print(manuscript_distribution)
+cat("Manuscript groups total:", sum(manuscript_distribution$n_respondents), "\n")
+
+# ============================================================================
+# SAVE RESULTS
+# ============================================================================
+
 results <- list(
+  data_version = data_version,
   stakeholder_distribution = stakeholder_distribution,
-  geographic_distribution = geographic_distribution,
-  survey_data = survey_data
+  manuscript_distribution = manuscript_distribution,
+  survey_data = survey_data,
+  summary = list(
+    total_responses = nrow(survey_data),
+    total_categorized = sum(stakeholder_distribution$n_respondents),
+    classification_method = ifelse(
+      data_version == "CLASSIFIED",
+      "Appendix J Manual Classification",
+      "Preliminary Automated Classification"
+    )
+  )
 )
 
 saveRDS(results, here("output", "analysis_results.rds"))
-cat("Results saved to output/analysis_results.rds\n")
-
-# Generate summary report
-cat("\n=== ANALYSIS COMPLETE ===\n")
-cat("Total responses analyzed:", nrow(survey_data), "\n")
-cat("Date range:", min(survey_data$StartDate_month, na.rm = TRUE),
-    "to", max(survey_data$EndDate_month, na.rm = TRUE), "\n")
+cat("\nResults saved to output/analysis_results.rds\n")
