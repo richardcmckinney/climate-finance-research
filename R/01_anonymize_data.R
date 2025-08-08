@@ -2,7 +2,9 @@
 # Author: Richard McKinney
 # Date: 2025-08-06
 # Purpose: Create anonymized versions of survey data with and without classifications
-
+# Ensure S4 methods are available when running via Rscript
+if (!"methods" %in% loadedNamespaces()) library(methods)
+suppressPackageStartupMessages(library(tidyverse))  # if you use dplyr/readr/etc.
 library(tidyverse)
 library(digest)
 library(here)
