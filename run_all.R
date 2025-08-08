@@ -18,6 +18,7 @@
 #   --quiet         Suppress verbose console logging
 
 suppressPackageStartupMessages({
+  if (!"methods" %in% loadedNamespaces()) library(methods)
   required_pkgs <- c("readr","dplyr","tibble","digest","cli")
 })
 
