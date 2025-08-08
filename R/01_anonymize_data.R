@@ -19,7 +19,8 @@ scrub_text <- function(x) {
   # phone numbers (international and common formats)
   x <- gsub("(?i)\n?\\+?\\d[\\\nd\\s().-]{7,}\n?", "[REDACTED_PHONE]", x, perl = TRUE)
   # URLs
-  x <- gsub("(?i)(https?://\n?\n?\n?\n?\n?\n?\n?\n?\S+|www\\.[A-Za-z0-9.-]+\\.[A-Za-z]{2,}\\S*)", "[REDACTED_URL]", x, perl = TRUE)
+  # URLs (avoid \\\\S; use POSIX class for portability)
+  x <- gsub("(?i)(https?://[^[:space:]]+|www\\.[A-Za-z0-9.-]+\\.[A-Za-z]{2,}[^[:space:]]*)", "[REDACTED_URL]", x, perl = TRUE)
   # social handles like @username
   x <- gsub("(^|\\s)@[A-Za-z0-9_]{2,15}\\b", "\\1[REDACTED_HANDLE]", x, perl = TRUE)
   x
