@@ -8,7 +8,7 @@ This repository contains the complete anonymized survey data and analysis code f
 
 **Author:** Richard McKinney  
 **Email:** richardmckinney@pm.me  
-**ORCID:** 0009-0007-1386-6881
+**ORCID:** 0009-0007-1386-6881  
 **Institution:** University of Oxford
 
 ### Study Summary
