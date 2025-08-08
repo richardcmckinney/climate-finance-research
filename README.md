@@ -221,8 +221,8 @@ We thank the 1,307 climate finance professionals who participated in this survey
 
 **Richard McKinney**  
 Email: richardmckinney@pm.me  
-ORCID: [Your ORCID if available]  
-Institution: [Your Institution]
+ORCID: 0009-0007-1386-6881  
+Institution: University of Oxford
 
 For questions about the data or analysis, please open an issue in this repository or contact the author directly.
 
