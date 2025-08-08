@@ -39,7 +39,7 @@ drop_if_present <- function(df, cols) {
   df %>% select(-any_of(cols))
 }
 
-# Robust month parser → returns "YYYY-MM" or NA; never throws
+# Robust month parser — NEVER errors; returns "YYYY-MM" or NA
 safe_month <- function(x) {
   if (is.null(x)) return(NA_character_)
   v <- trimws(as.character(x))
@@ -53,29 +53,30 @@ safe_month <- function(x) {
     "%d-%b-%Y %H:%M", "%d-%b-%Y",
     "%b %d, %Y %H:%M", "%b %d, %Y"
   )
+  lub_orders <- c("Ymd HMS","Ymd HM","Ymd",
+                  "mdY HMS","mdY HM","mdY",
+                  "dmy HMS","dmy HM","dmy",
+                  "d-b-Y HM","d-b-Y","b d, Y HM","b d, Y")
 
-  ts <- suppressWarnings(as.POSIXct(v, tz = "UTC", tryFormats = try_formats))
-
-  # Fallback to lubridate if available for stubborn strings
-  if (anyNA(ts) && requireNamespace("lubridate", quietly = TRUE)) {
-    na_ix <- is.na(ts)
-    if (any(na_ix)) {
-      parsed <- suppressWarnings(
-        lubridate::parse_date_time(
-          v[na_ix],
-          orders = c("Ymd HMS","Ymd HM","Ymd",
-                     "mdY HMS","mdY HM","mdY",
-                     "dmy HMS","dmy HM","dmy",
-                     "d-b-Y HM","d-b-Y","b d, Y HM","b d, Y"),
-          tz = "UTC",
-          quiet = TRUE
-        )
-      )
-      ts[na_ix] <- parsed
+  parse_one <- function(s) {
+    if (is.na(s)) return(NA_character_)
+    # Try base formats one by one; swallow all errors
+    for (fmt in try_formats) {
+      dt <- try(as.POSIXct(s, format = fmt, tz = "UTC"), silent = TRUE)
+      if (!inherits(dt, "try-error") && !is.na(dt)) return(format(dt, "%Y-%m"))
     }
+    # Fallback to lubridate if present
+    if (requireNamespace("lubridate", quietly = TRUE)) {
+      dt <- try(
+        lubridate::parse_date_time(s, orders = lub_orders, tz = "UTC", quiet = TRUE),
+        silent = TRUE
+      )
+      if (!inherits(dt, "try-error") && !is.na(dt)) return(format(dt, "%Y-%m"))
+    }
+    NA_character_
   }
 
-  ifelse(is.na(ts), NA_character_, format(ts, "%Y-%m"))
+  vapply(v, parse_one, character(1))
 }
 
 # Preliminary category from Q2.1 text (conservative, Appendix-J aligned buckets)
