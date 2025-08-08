@@ -1,8 +1,29 @@
+# R project files
 .Rproj.user
 .Rhistory
-.Rdata
+.RData
+.Ruserdata
+
+# OAuth tokens
 .httr-oauth
+
+# System files
 .DS_Store
+
+# Quarto
 .quarto
+
+# Raw input data
 data_raw/
+
+# Workspace data files
 *.RData
+*.rds
+
+# Generated outputs
+data/*.csv
+docs/*.csv
+output/
+
+# Logs
+*.log
