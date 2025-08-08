@@ -262,6 +262,7 @@ if (!have_role) {
       preliminary_category      = map_prelim_role(role_raw, role_other),
       final_category_appendix_j = NA_character_
     )
+  template <- template %>% arrange(respondent_id) %>% distinct(respondent_id, .keep_all = TRUE)
 
   readr::write_csv(template, config$output_paths$template)
   cat("Classification template ->", normalizePath(config$output_paths$template), "\n")
@@ -277,14 +278,18 @@ if (!have_role) {
       left_join(template %>% select(respondent_id, preliminary_category), by = "respondent_id") %>%
       left_join(final_map, by = "respondent_id") %>%
       mutate(stakeholder_category = coalesce(final_category_appendix_j, preliminary_category)) %>%
-      select(-preliminary_category, -final_category_appendix_j)
+      select(-preliminary_category, -final_category_appendix_j) %>%
+      arrange(respondent_id) %>%
+      distinct(respondent_id, .keep_all = TRUE)
 
     readr::write_csv(out_class, config$output_paths$classified)
     cat("Classified data ->", normalizePath(config$output_paths$classified), "\n")
   } else {
     out_prelim <- an_basic %>%
       left_join(template %>% select(respondent_id, preliminary_category), by = "respondent_id") %>%
-      rename(stakeholder_category = preliminary_category)
+      rename(stakeholder_category = preliminary_category) %>%
+      arrange(respondent_id) %>%
+      distinct(respondent_id, .keep_all = TRUE)
 
     readr::write_csv(out_prelim, config$output_paths$preliminary)
     cat("Preliminary classified data ->", normalizePath(config$output_paths$preliminary), "\n")
