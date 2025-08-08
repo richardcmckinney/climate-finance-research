@@ -2,7 +2,7 @@
 # Enhanced, robust anonymization + Appendix J prep (optimized)
 # Works with Qualtrics headers like "Q2.1", "QID174", or long question text
 
-suppresPackageStartupMessages({
+suppressPackageStartupMessages({
   if (!"methods" %in% loadedNamespaces()) library(methods)
   library(tidyverse)
   library(lubridate)
@@ -17,7 +17,7 @@ scrub_text <- function(x) {
   # emails
   x <- gsub("(?i)[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}", "[REDACTED_EMAIL]", x, perl = TRUE)
   # phone numbers (international and common formats)
-  x <- gsub("(?i)\n?\\+?\\d[\\\nd\\s().-]{7,}\n?", "[REDACTED_PHONE]", x, perl = TRUE)
+  x <- gsub("(?i)\\+?\\d[\\d\\s().-]{7,}\\d", "[REDACTED_PHONE]", x, perl = TRUE)
   # URLs
   # URLs (avoid \\\\S; use POSIX class for portability)
   x <- gsub("(?i)(https?://[^[:space:]]+|www\\.[A-Za-z0-9.-]+\\.[A-Za-z]{2,}[^[:space:]]*)", "[REDACTED_URL]", x, perl = TRUE)
