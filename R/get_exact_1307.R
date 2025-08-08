@@ -1,4 +1,6 @@
 # get_exact_1307.R — deterministic Appendix J quota-matching (publication-grade)
+# Ensure S4 methods are available when running via Rscript
+if (!"methods" %in% loadedNamespaces()) library(methods)
 suppressPackageStartupMessages(library(tidyverse))
 set.seed(1307)
 
