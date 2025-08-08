@@ -5,8 +5,8 @@ RESP_02a62f70db,Other (please specify),Consulting Company For Supporting Stakeho
 RESP_0343098ddc,Other (please specify),Technical Consulting Firm,other please specify,technical consulting firm,TRUE,Business Consulting and Advisory,Business Consulting and Advisory
 RESP_0350d33afa,Other (please specify),LLC,other please specify,llc,TRUE,Corporate Entities,Corporate Entities
 RESP_03b90d4356,Other (please specify),investor Relations,other please specify,investor relations,TRUE,Miscellaneous and Individual Respondents,Miscellaneous and Individual Respondents
-RESP_05008e899e,Other (please specify),Real estate owner/operator,other please specify,real estate owner operator,TRUE,Government Funding Agency,Government Funding Agency
-RESP_05c33fe05e,Other (please specify),Marketplace for securitized environmental projects,other please specify,marketplace for securitized environmental projects,TRUE,Miscellaneous and Individual Respondents,Miscellaneous and Individual Respondents
+RESP_05008e899e,Other (please specify),Real estate owner/operator,other please specify,real estate owner operator,TRUE,Real Estate and Property,Real Estate and Property
+RESP_05c33fe05e,Other (please specify),Marketplace for securitized environmental projects,other please specify,marketplace for securitized environmental projects,TRUE,Investment and Financial Services,Investment and Financial Services
 RESP_05e663e76e,Other (please specify),"A venture builder, and VC fund manager in deep tech for climate tech",other please specify,a venture builder and vc fund manager in deep tech for climate tech,TRUE,Entrepreneur in Climate Technology,Entrepreneur in Climate Technology
 RESP_05ff190fa6,Other (please specify),German PLC,other please specify,german plc,TRUE,Corporate Entities,Corporate Entities
 RESP_0678be7d82,Other (please specify),Business owner,other please specify,business owner,TRUE,Miscellaneous and Individual Respondents,Miscellaneous and Individual Respondents
@@ -14,8 +14,8 @@ RESP_06de37d3b9,Other (please specify),Attorney,other please specify,attorney,TR
 RESP_0709b86e18,Other (please specify),CFO at an Energy Corporate,other please specify,cfo at an energy corporate,TRUE,Corporate Entities,Corporate Entities
 RESP_076b4d2734,Other (please specify),Private company backed by PE,other please specify,private company backed by pe,TRUE,Corporate Entities,Corporate Entities
 RESP_0883033364,Other (please specify),Capital formation advisor,other please specify,capital formation advisor,TRUE,Business Consulting and Advisory,Business Consulting and Advisory
-RESP_09cf9c39a1,Other (please specify),Manurfacturing,other please specify,manurfacturing,TRUE,Miscellaneous and Individual Respondents,Miscellaneous and Individual Respondents
-RESP_0a5467f060,Other (please specify),Translation agency,other please specify,translation agency,TRUE,Government Funding Agency,Government Funding Agency
+RESP_09cf9c39a1,Other (please specify),Manurfacturing,other please specify,manurfacturing,TRUE,Manufacturing and Industrial,Manufacturing and Industrial
+RESP_0a5467f060,Other (please specify),Translation agency,other please specify,translation agency,TRUE,Miscellaneous and Individual Respondents,Miscellaneous and Individual Respondents
 RESP_0acbb3c82b,Other (please specify),Media,other please specify,media,TRUE,Media and Communication,Media and Communication
 RESP_0aed1b8708,Other (please specify),Entrepreneur non climate tech,other please specify,entrepreneur non climate tech,TRUE,Entrepreneur in Climate Technology,Entrepreneur in Climate Technology
 RESP_0cf2d76cf4,Other (please specify),Small Business Owner,other please specify,small business owner,TRUE,Miscellaneous and Individual Respondents,Miscellaneous and Individual Respondents
@@ -23,12 +23,12 @@ RESP_0d4ba986a6,Other (please specify),Corporate,other please specify,corporate,
 RESP_0d4f042763,Other (please specify),Solicitor,other please specify,solicitor,TRUE,Legal Services,Legal Services
 RESP_0d5bd58aa3,Other (please specify),Industrial company owner,other please specify,industrial company owner,TRUE,Manufacturing and Industrial,Manufacturing and Industrial
 RESP_0d8b0205f8,Other (please specify),Listed multi-national company,other please specify,listed multi national company,TRUE,Corporate Entities,Corporate Entities
-RESP_0e4162ac00,Other (please specify),Member of governance structure of a power utlity,other please specify,member of governance structure of a power utlity,TRUE,Miscellaneous and Individual Respondents,Miscellaneous and Individual Respondents
+RESP_0e4162ac00,Other (please specify),Member of governance structure of a power utlity,other please specify,member of governance structure of a power utlity,TRUE,Energy and Infrastructure,Energy and Infrastructure
 RESP_0e48d7e7bf,Other (please specify),Private Clean Energy Research Firm,other please specify,private clean energy research firm,TRUE,Miscellaneous and Individual Respondents,Miscellaneous and Individual Respondents
 RESP_10f3bee694,Other (please specify),Multilateral Development Bank,other please specify,multilateral development bank,TRUE,Government Funding Agency,Government Funding Agency
 RESP_118a30fd0d,Other (please specify),Philanthropic Consulting,other please specify,philanthropic consulting,TRUE,Philanthropic Organization,Philanthropic Organization
 RESP_119826f1fe,Other (please specify),food waste recycler,other please specify,food waste recycler,TRUE,Miscellaneous and Individual Respondents,Miscellaneous and Individual Respondents
-RESP_12d59881ff,Other (please specify),Energy firm,other please specify,energy firm,TRUE,Miscellaneous and Individual Respondents,Miscellaneous and Individual Respondents
+RESP_12d59881ff,Other (please specify),Energy firm,other please specify,energy firm,TRUE,Energy and Infrastructure,Energy and Infrastructure
 RESP_12de6abb48,Other (please specify),Privately held manufacturer,other please specify,privately held manufacturer,TRUE,Manufacturing and Industrial,Manufacturing and Industrial
 RESP_12ebe1883f,Other (please specify),"Combination of VC, Family office, philanthropist and ESG investor",other please specify,combination of vc family office philanthropist and esg investor,TRUE,Venture Capital Firm,Venture Capital Firm
 RESP_136705a24c,Other (please specify),Fintech start up,other please specify,fintech start up,TRUE,Investment and Financial Services,Investment and Financial Services
@@ -53,18 +53,18 @@ RESP_1e979a7101,Other (please specify),CEO of a company owned by Private Equity,
 RESP_20637b04bc,Other (please specify),Law firm,other please specify,law firm,TRUE,Legal Services,Legal Services
 RESP_22cf28bda0,Other (please specify),law firm for tech clients,other please specify,law firm for tech clients,TRUE,Legal Services,Legal Services
 RESP_22eeac6155,Other (please specify),Engineering SME,other please specify,engineering sme,TRUE,Miscellaneous and Individual Respondents,Miscellaneous and Individual Respondents
-RESP_22f5a85511,Other (please specify),Real Estate Developer,other please specify,real estate developer,TRUE,Government Funding Agency,Government Funding Agency
+RESP_22f5a85511,Other (please specify),Real Estate Developer,other please specify,real estate developer,TRUE,Real Estate and Property,Real Estate and Property
 RESP_2388ad06b4,Other (please specify),Law firm,other please specify,law firm,TRUE,Legal Services,Legal Services
 RESP_23a351f99c,Other (please specify),Attorney on natural resources and environmental issues,other please specify,attorney on natural resources and environmental issues,TRUE,Legal Services,Legal Services
 RESP_247a1b1603,Other (please specify),M&A Advisor,other please specify,m a advisor,TRUE,Business Consulting and Advisory,Business Consulting and Advisory
-RESP_249fbc595e,Other (please specify),Venture Studio,other please specify,venture studio,TRUE,Miscellaneous and Individual Respondents,Business Consulting and Advisory
+RESP_249fbc595e,Other (please specify),Venture Studio,other please specify,venture studio,TRUE,Business Consulting and Advisory,Business Consulting and Advisory
 RESP_24a546a4ee,Other (please specify),venture capital firm + new venturing + building strategic value chains,other please specify,venture capital firm new venturing building strategic value chains,TRUE,Venture Capital Firm,Venture Capital Firm
 RESP_267a44a2ab,Other (please specify),Law Firm,other please specify,law firm,TRUE,Legal Services,Legal Services
 RESP_27680c100b,Other (please specify),Founder of an Indian law firm,other please specify,founder of an indian law firm,TRUE,Legal Services,Legal Services
 RESP_2831526635,Other (please specify),Limited Company,other please specify,limited company,TRUE,Corporate Entities,Corporate Entities
 RESP_2933707279,Other (please specify),Financial Infrastructure Provider,other please specify,financial infrastructure provider,TRUE,Investment and Financial Services,Investment and Financial Services
-RESP_293c492080,Other (please specify),Real Estate Developer,other please specify,real estate developer,TRUE,Government Funding Agency,Government Funding Agency
-RESP_2b17f9f3ce,Other (please specify),Financial Research Analyst,other please specify,financial research analyst,TRUE,Investment and Financial Services,Investment and Financial Services
+RESP_293c492080,Other (please specify),Real Estate Developer,other please specify,real estate developer,TRUE,Real Estate and Property,Real Estate and Property
+RESP_2b17f9f3ce,Other (please specify),Financial Research Analyst,other please specify,financial research analyst,TRUE,Miscellaneous and Individual Respondents,Miscellaneous and Individual Respondents
 RESP_2b41306f00,Other (please specify),Founder of an IT Company,other please specify,founder of an it company,TRUE,Corporate Entities,Corporate Entities
 RESP_2bc79196ba,Other (please specify),corporate finance professional,other please specify,corporate finance professional,TRUE,Corporate Entities,Corporate Entities
 RESP_2c4c341030,Other (please specify),BANK,other please specify,bank,TRUE,Miscellaneous and Individual Respondents,Miscellaneous and Individual Respondents
@@ -82,7 +82,7 @@ RESP_35c1cba582,Other (please specify),Pension Fund,other please specify,pension
 RESP_35e76efabd,Other (please specify),Engineering Constructor,other please specify,engineering constructor,TRUE,Miscellaneous and Individual Respondents,Miscellaneous and Individual Respondents
 RESP_361c9dd1d1,Other (please specify),alternative asset manager,other please specify,alternative asset manager,TRUE,Investment and Financial Services,Investment and Financial Services
 RESP_365c9c7654,Other (please specify),Insurance Company,other please specify,insurance company,TRUE,Investment and Financial Services,Investment and Financial Services
-RESP_37c180baba,Other (please specify),property services firm,other please specify,property services firm,TRUE,Real Estate and Property,Real Estate and Property
+RESP_37c180baba,Other (please specify),property services firm,other please specify,property services firm,TRUE,Miscellaneous and Individual Respondents,Miscellaneous and Individual Respondents
 RESP_382cc1b28b,Other (please specify),Advocates and Solicitor Firm,other please specify,advocates and solicitor firm,TRUE,Legal Services,Legal Services
 RESP_39ea09d8d3,Other (please specify),Lawyer,other please specify,lawyer,TRUE,Legal Services,Legal Services
 RESP_3a3a46f95c,Other (please specify),cybersecurity researcher,other please specify,cybersecurity researcher,TRUE,Miscellaneous and Individual Respondents,Miscellaneous and Individual Respondents
@@ -108,7 +108,7 @@ RESP_5215fef740,Other (please specify),CHIEF,other please specify,chief,TRUE,Mis
 RESP_562e25e185,Other (please specify),energy service company,other please specify,energy service company,TRUE,Energy and Infrastructure,Energy and Infrastructure
 RESP_5735ecd22b,Other (please specify),Lawyer,other please specify,lawyer,TRUE,Legal Services,Legal Services
 RESP_590b50530b,Other (please specify),Data vendor,other please specify,data vendor,TRUE,Miscellaneous and Individual Respondents,Miscellaneous and Individual Respondents
-RESP_5d3e382ee5,Other (please specify),real estate adviser,other please specify,real estate adviser,TRUE,Government Funding Agency,Government Funding Agency
+RESP_5d3e382ee5,Other (please specify),real estate adviser,other please specify,real estate adviser,TRUE,Real Estate and Property,Real Estate and Property
 RESP_5e8dd45693,Other (please specify),Sovereign wealth fund,other please specify,sovereign wealth fund,TRUE,Investment and Financial Services,Investment and Financial Services
 RESP_5f948f70a2,Other (please specify),Clean tech company,other please specify,clean tech company,TRUE,Technology and Software,Technology and Software
 RESP_601f111f47,Other (please specify),Lawfirm,other please specify,lawfirm,TRUE,Legal Services,Legal Services
@@ -118,7 +118,7 @@ RESP_67b1073082,Other (please specify),Pensioner,other please specify,pensioner,
 RESP_68d9280d1e,Other (please specify),Financial advisor,other please specify,financial advisor,TRUE,Investment and Financial Services,Investment and Financial Services
 RESP_6a539eb68c,Other (please specify),incubator/accelerator,other please specify,incubator accelerator,TRUE,Corporate Entities,Corporate Entities
 RESP_6b19d93cfd,Other (please specify),Legal adviser to Family offices,other please specify,legal adviser to family offices,TRUE,Family Office,Family Office
-RESP_6c03c11717,Other (please specify),Law office,other please specify,law office,TRUE,Miscellaneous and Individual Respondents,Miscellaneous and Individual Respondents
+RESP_6c03c11717,Other (please specify),Law office,other please specify,law office,TRUE,Legal Services,Legal Services
 RESP_6c7c35e8c2,Other (please specify),energy utility,other please specify,energy utility,TRUE,Energy and Infrastructure,Energy and Infrastructure
 RESP_6d86161a45,Other (please specify),M&A advisory and Business Development of renewable power generation,other please specify,m a advisory and business development of renewable power generation,TRUE,Business Consulting and Advisory,Business Consulting and Advisory
 RESP_6d8fb441cd,Other (please specify),Media Production Company,other please specify,media production company,TRUE,Manufacturing and Industrial,Manufacturing and Industrial
@@ -140,7 +140,7 @@ RESP_79ab3f035b,Other (please specify),Hedge fund,other please specify,hedge fun
 RESP_7a2288db65,Other (please specify),local economic development organization,other please specify,local economic development organization,TRUE,Miscellaneous and Individual Respondents,Miscellaneous and Individual Respondents
 RESP_7a90c693ad,Other (please specify),Retired high net worth individual,other please specify,retired high net worth individual,TRUE,High Net-Worth Individual,High Net-Worth Individual
 RESP_7abf75064b,Other (please specify),Limited Company,other please specify,limited company,TRUE,Corporate Entities,Corporate Entities
-RESP_7ae56adf2d,Other (please specify),Real Estate Investment Trust,other please specify,real estate investment trust,TRUE,Government Funding Agency,Government Funding Agency
+RESP_7ae56adf2d,Other (please specify),Real Estate Investment Trust,other please specify,real estate investment trust,TRUE,Real Estate and Property,Real Estate and Property
 RESP_7bbc1bb526,Other (please specify),Large Diversified Conglomerate,other please specify,large diversified conglomerate,TRUE,Corporate Entities,Corporate Entities
 RESP_7bd3fd5f4a,Other (please specify),Consultancy,other please specify,consultancy,TRUE,Business Consulting and Advisory,Business Consulting and Advisory
 RESP_7be38cf223,Other (please specify),Investment Bank,other please specify,investment bank,TRUE,Investment and Financial Services,Investment and Financial Services
@@ -160,13 +160,13 @@ RESP_8594fe8c31,Other (please specify),Public pension fund,other please specify,
 RESP_85e7265556,Other (please specify),CEO Law Firm,other please specify,ceo law firm,TRUE,Legal Services,Legal Services
 RESP_886778ceaa,Other (please specify),Mineral exploration company in battery minerals sector,other please specify,mineral exploration company in battery minerals sector,TRUE,Entrepreneur in Climate Technology,Entrepreneur in Climate Technology
 RESP_8bdecc5568,Other (please specify),Privately held company … i think this questionnaire may not be for us,other please specify,privately held company i think this questionnaire may not be for us,TRUE,Corporate Entities,Corporate Entities
-RESP_8bf8ac3256,Other (please specify),Impact First Debt Investor,other please specify,impact first debt investor,TRUE,Miscellaneous and Individual Respondents,Miscellaneous and Individual Respondents
+RESP_8bf8ac3256,Other (please specify),Impact First Debt Investor,other please specify,impact first debt investor,TRUE,ESG Investor,ESG Investor
 RESP_8f2d2cb605,Other (please specify),Law Firm,other please specify,law firm,TRUE,Legal Services,Legal Services
 RESP_8f768f5ed8,Other (please specify),Asset Manager,other please specify,asset manager,TRUE,Investment and Financial Services,Investment and Financial Services
 RESP_8f800de8f0,Other (please specify),Insurer,other please specify,insurer,TRUE,Miscellaneous and Individual Respondents,Miscellaneous and Individual Respondents
 RESP_9047348779,Other (please specify),Packaging manufacturer,other please specify,packaging manufacturer,TRUE,Manufacturing and Industrial,Manufacturing and Industrial
 RESP_90f3e82206,Other (please specify),Lawyer for VC funds and VC-backed companies,other please specify,lawyer for vc funds and vc backed companies,TRUE,Legal Services,Legal Services
-RESP_90f6dbbe92,Other (please specify),Electric Cooperative,other please specify,electric cooperative,TRUE,Miscellaneous and Individual Respondents,Miscellaneous and Individual Respondents
+RESP_90f6dbbe92,Other (please specify),Electric Cooperative,other please specify,electric cooperative,TRUE,Energy and Infrastructure,Energy and Infrastructure
 RESP_9263894cab,Other (please specify),Infrastructure fund manager,other please specify,infrastructure fund manager,TRUE,Investment and Financial Services,Investment and Financial Services
 RESP_927ade98f6,Other (please specify),Investor Relations Consultancy,other please specify,investor relations consultancy,TRUE,Business Consulting and Advisory,Business Consulting and Advisory
 RESP_94600ed056,Other (please specify),Telecom ownership,other please specify,telecom ownership,TRUE,Miscellaneous and Individual Respondents,Miscellaneous and Individual Respondents
@@ -201,10 +201,10 @@ RESP_a6d9d61346,Other (please specify),Auto Insurance Company,other please speci
 RESP_a8b249401b,Other (please specify),Consulting,other please specify,consulting,TRUE,Business Consulting and Advisory,Business Consulting and Advisory
 RESP_a913190918,Other (please specify),Entrepreneur in a related climate tech space.,other please specify,entrepreneur in a related climate tech space,TRUE,Entrepreneur in Climate Technology,Entrepreneur in Climate Technology
 RESP_a9643a33f3,Other (please specify),Education enterpreneur,other please specify,education enterpreneur,TRUE,Miscellaneous and Individual Respondents,Miscellaneous and Individual Respondents
-RESP_aa0d4240bb,Other (please specify),Industrial Real Estate developer,other please specify,industrial real estate developer,TRUE,Government Funding Agency,Government Funding Agency
+RESP_aa0d4240bb,Other (please specify),Industrial Real Estate developer,other please specify,industrial real estate developer,TRUE,Real Estate and Property,Real Estate and Property
 RESP_aa9b9e75ad,Other (please specify),Conglomerate,other please specify,conglomerate,TRUE,Corporate Entities,Corporate Entities
-RESP_aab3c05ec6,Other (please specify),Permanent capital investor,other please specify,permanent capital investor,TRUE,Miscellaneous and Individual Respondents,Miscellaneous and Individual Respondents
-RESP_ac66d40e22,Other (please specify),Local government,other please specify,local government,TRUE,Government Funding Agency,Government Funding Agency
+RESP_aab3c05ec6,Other (please specify),Permanent capital investor,other please specify,permanent capital investor,TRUE,Investment and Financial Services,Investment and Financial Services
+RESP_ac66d40e22,Other (please specify),Local government,other please specify,local government,TRUE,Miscellaneous and Individual Respondents,Miscellaneous and Individual Respondents
 RESP_ad7e32f0dc,Other (please specify),acquired scale-up,other please specify,acquired scale up,TRUE,Miscellaneous and Individual Respondents,Miscellaneous and Individual Respondents
 RESP_ade91d9c64,Other (please specify),Management Consulting,other please specify,management consulting,TRUE,Business Consulting and Advisory,Business Consulting and Advisory
 RESP_adec78090e,Other (please specify),Director of SME,other please specify,director of sme,TRUE,Miscellaneous and Individual Respondents,Miscellaneous and Individual Respondents
@@ -212,12 +212,12 @@ RESP_af69087c6a,Other (please specify),Assurance and Advisory services,other ple
 RESP_b04001e6ce,Other (please specify),Investment Banker - arranges financing for renewables developers and buys and sells assets,other please specify,investment banker arranges financing for renewables developers and buys and sells assets,TRUE,Investment and Financial Services,Investment and Financial Services
 RESP_b04a52625c,Other (please specify),Think tank,other please specify,think tank,TRUE,Miscellaneous and Individual Respondents,Miscellaneous and Individual Respondents
 RESP_b0a9f9fdfe,Other (please specify),For profit organization,other please specify,for profit organization,TRUE,Miscellaneous and Individual Respondents,Miscellaneous and Individual Respondents
-RESP_b250657e46,Other (please specify),Development Finance,other please specify,development finance,TRUE,Government Funding Agency,Government Funding Agency
+RESP_b250657e46,Other (please specify),Development Finance,other please specify,development finance,TRUE,Miscellaneous and Individual Respondents,Miscellaneous and Individual Respondents
 RESP_b2c1384b9c,Other (please specify),Corporate,other please specify,corporate,TRUE,Corporate Entities,Corporate Entities
 RESP_b4c25c7c14,Other (please specify),Privately Held Company,other please specify,privately held company,TRUE,Corporate Entities,Corporate Entities
 RESP_b4c42a8699,Other (please specify),Impact Investor,other please specify,impact investor,TRUE,ESG Investor,ESG Investor
 RESP_b4c8a845ab,Other (please specify),Law firm,other please specify,law firm,TRUE,Legal Services,Legal Services
-RESP_b53cfe121a,Other (please specify),Government pension fund,other please specify,government pension fund,TRUE,Government Funding Agency,Investment and Financial Services
+RESP_b53cfe121a,Other (please specify),Government pension fund,other please specify,government pension fund,TRUE,Investment and Financial Services,Investment and Financial Services
 RESP_b56627a072,Other (please specify),CFO in PE backed company,other please specify,cfo in pe backed company,TRUE,Corporate Entities,Corporate Entities
 RESP_b608961c28,Other (please specify),Corporate lawyer,other please specify,corporate lawyer,TRUE,Legal Services,Legal Services
 RESP_b67444f748,Other (please specify),Importer and distributor of animal feed,other please specify,importer and distributor of animal feed,TRUE,Miscellaneous and Individual Respondents,Miscellaneous and Individual Respondents
@@ -230,7 +230,7 @@ RESP_b86889684c,Other (please specify),Business Consultancy,other please specify
 RESP_b8a0abc6d3,Other (please specify),Franchised consumer goods distributor,other please specify,franchised consumer goods distributor,TRUE,Miscellaneous and Individual Respondents,Miscellaneous and Individual Respondents
 RESP_b946da24af,Other (please specify),CEO,other please specify,ceo,TRUE,Miscellaneous and Individual Respondents,Miscellaneous and Individual Respondents
 RESP_b978dbf6f2,Other (please specify),Software vendor,other please specify,software vendor,TRUE,Technology and Software,Technology and Software
-RESP_b9cc2ef758,Other (please specify),Gas Transmission System Operator,other please specify,gas transmission system operator,TRUE,Miscellaneous and Individual Respondents,Miscellaneous and Individual Respondents
+RESP_b9cc2ef758,Other (please specify),Gas Transmission System Operator,other please specify,gas transmission system operator,TRUE,Energy and Infrastructure,Energy and Infrastructure
 RESP_ba2edb1409,Other (please specify),Asset owner,other please specify,asset owner,TRUE,Miscellaneous and Individual Respondents,Miscellaneous and Individual Respondents
 RESP_bc97bccd86,Other (please specify),Private investment companhy,other please specify,private investment companhy,TRUE,Miscellaneous and Individual Respondents,Miscellaneous and Individual Respondents
 RESP_bd653873c8,Other (please specify),Asset Manager,other please specify,asset manager,TRUE,Investment and Financial Services,Investment and Financial Services
@@ -264,7 +264,7 @@ RESP_d2eebbaf13,Other (please specify),International business Lawyer,other pleas
 RESP_d318c6f024,Other (please specify),Developer,other please specify,developer,TRUE,Miscellaneous and Individual Respondents,Miscellaneous and Individual Respondents
 RESP_d346309d29,Other (please specify),Entrepreneur,other please specify,entrepreneur,TRUE,Miscellaneous and Individual Respondents,Miscellaneous and Individual Respondents
 RESP_d34ae5a86e,Other (please specify),Patent law firm,other please specify,patent law firm,TRUE,Legal Services,Legal Services
-RESP_d3dc84582d,Other (please specify),Development Financial Institution,other please specify,development financial institution,TRUE,Investment and Financial Services,Investment and Financial Services
+RESP_d3dc84582d,Other (please specify),Development Financial Institution,other please specify,development financial institution,TRUE,Miscellaneous and Individual Respondents,Miscellaneous and Individual Respondents
 RESP_d4056a3913,Other (please specify),Banking,other please specify,banking,TRUE,Miscellaneous and Individual Respondents,Miscellaneous and Individual Respondents
 RESP_d42a52c209,Other (please specify),For Profit Company,other please specify,for profit company,TRUE,Corporate Entities,Corporate Entities
 RESP_d4672afd4c,Other (please specify),Holding company,other please specify,holding company,TRUE,Corporate Entities,Corporate Entities
@@ -280,7 +280,7 @@ RESP_dafc33a5ac,Other (please specify),Publicly listed company,other please spec
 RESP_dbe66ac353,Other (please specify),Investment Banking Firm,other please specify,investment banking firm,TRUE,Investment and Financial Services,Investment and Financial Services
 RESP_dbff800729,Other (please specify),Lawyer,other please specify,lawyer,TRUE,Legal Services,Legal Services
 RESP_dcdecf055d,Other (please specify),Investment Consultant,other please specify,investment consultant,TRUE,Business Consulting and Advisory,Business Consulting and Advisory
-RESP_dd3d4f8504,Other (please specify),Venture studio,other please specify,venture studio,TRUE,Miscellaneous and Individual Respondents,Business Consulting and Advisory
+RESP_dd3d4f8504,Other (please specify),Venture studio,other please specify,venture studio,TRUE,Business Consulting and Advisory,Business Consulting and Advisory
 RESP_dee92939ab,Other (please specify),Lawyer,other please specify,lawyer,TRUE,Legal Services,Legal Services
 RESP_df3a47b9c1,Other (please specify),Green Guarantee Company,other please specify,green guarantee company,TRUE,Corporate Entities,Corporate Entities
 RESP_df7cca6033,Other (please specify),Industrial Conglomerate,other please specify,industrial conglomerate,TRUE,Manufacturing and Industrial,Manufacturing and Industrial
@@ -293,13 +293,13 @@ RESP_e525dd6b19,Other (please specify),Attorney,other please specify,attorney,TR
 RESP_e5a0737c7f,Other (please specify),lawyer,other please specify,lawyer,TRUE,Legal Services,Legal Services
 RESP_e7122dadd5,Other (please specify),japanese enterprise,other please specify,japanese enterprise,TRUE,Miscellaneous and Individual Respondents,Miscellaneous and Individual Respondents
 RESP_e73a3c1f2b,Other (please specify),Institutional capital raise advisory & brokers,other please specify,institutional capital raise advisory brokers,TRUE,Business Consulting and Advisory,Business Consulting and Advisory
-RESP_e7d422291f,Other (please specify),Government Organisation,other please specify,government organisation,TRUE,Government Funding Agency,Government Funding Agency
+RESP_e7d422291f,Other (please specify),Government Organisation,other please specify,government organisation,TRUE,Miscellaneous and Individual Respondents,Miscellaneous and Individual Respondents
 RESP_e7d9b23410,Other (please specify),Ceo of trading company,other please specify,ceo of trading company,TRUE,Corporate Entities,Corporate Entities
 RESP_e86f786a24,Other (please specify),A publicly owned development finance institution,other please specify,a publicly owned development finance institution,TRUE,Government Funding Agency,Government Funding Agency
 RESP_eb59a93321,Other (please specify),Investment Banking,other please specify,investment banking,TRUE,Investment and Financial Services,Investment and Financial Services
 RESP_eba309b940,Other (please specify),ESG team at an asset owner,other please specify,esg team at an asset owner,TRUE,Miscellaneous and Individual Respondents,Miscellaneous and Individual Respondents
 RESP_ec5456bf8e,Other (please specify),Independent power producer,other please specify,independent power producer,TRUE,Energy and Infrastructure,Energy and Infrastructure
-RESP_ec7109ef48,Other (please specify),CEO building company,other please specify,ceo building company,TRUE,Real Estate and Property,Real Estate and Property
+RESP_ec7109ef48,Other (please specify),CEO building company,other please specify,ceo building company,TRUE,Corporate Entities,Corporate Entities
 RESP_ecda15cde2,Other (please specify),Press Office,other please specify,press office,TRUE,Media and Communication,Media and Communication
 RESP_ece1ebfaae,Other (please specify),Director in Climate Consulting and Project Organisation,other please specify,director in climate consulting and project organisation,TRUE,Entrepreneur in Climate Technology,Entrepreneur in Climate Technology
 RESP_ed1945b998,Other (please specify),Attorney,other please specify,attorney,TRUE,Legal Services,Legal Services
@@ -311,7 +311,7 @@ RESP_f17790ae5c,Other (please specify),Investment Bank raising capital for clima
 RESP_f20aef64c1,Other (please specify),Industrial in Paper and packaging,other please specify,industrial in paper and packaging,TRUE,Manufacturing and Industrial,Manufacturing and Industrial
 RESP_f31bc16d8c,Other (please specify),Investment Banking,other please specify,investment banking,TRUE,Investment and Financial Services,Investment and Financial Services
 RESP_f352bd481f,Other (please specify),Biotech company,other please specify,biotech company,TRUE,Technology and Software,Technology and Software
-RESP_f3604496f7,Other (please specify),Mfg Company,other please specify,mfg company,TRUE,Corporate Entities,Corporate Entities
+RESP_f3604496f7,Other (please specify),Mfg Company,other please specify,mfg company,TRUE,Manufacturing and Industrial,Manufacturing and Industrial
 RESP_f3921a70c8,Other (please specify),Limited Company,other please specify,limited company,TRUE,Corporate Entities,Corporate Entities
 RESP_f3b2a69180,Other (please specify),Investor Relations Advisor,other please specify,investor relations advisor,TRUE,Business Consulting and Advisory,Business Consulting and Advisory
 RESP_f406923fa4,Other (please specify),Entrepreneur offering sustainable products,other please specify,entrepreneur offering sustainable products,TRUE,Entrepreneur in Climate Technology,Entrepreneur in Climate Technology
@@ -326,7 +326,7 @@ RESP_fc1d98a83e,Other (please specify),Asset manager - private debt,other please
 RESP_fc865163e5,Other (please specify),Insurance chairman,other please specify,insurance chairman,TRUE,Investment and Financial Services,Investment and Financial Services
 RESP_fcb69efe08,Other (please specify),Bank,other please specify,bank,TRUE,Miscellaneous and Individual Respondents,Miscellaneous and Individual Respondents
 RESP_fcf45c0509,Other (please specify),Consulting,other please specify,consulting,TRUE,Business Consulting and Advisory,Business Consulting and Advisory
-RESP_fd83508ada,Other (please specify),consultant agency,other please specify,consultant agency,TRUE,Government Funding Agency,Government Funding Agency
+RESP_fd83508ada,Other (please specify),consultant agency,other please specify,consultant agency,TRUE,Business Consulting and Advisory,Business Consulting and Advisory
 RESP_fdb4b57626,Other (please specify),LAW & TAX FIRM,other please specify,law tax firm,TRUE,Miscellaneous and Individual Respondents,Miscellaneous and Individual Respondents
 RESP_fdd56fe5e6,Other (please specify),Start-up/Scale-up company,other please specify,start up scale up company,TRUE,Corporate Entities,Corporate Entities
 RESP_fddf7837de,Other (please specify),consultant specialized in green industry,other please specify,consultant specialized in green industry,TRUE,Business Consulting and Advisory,Business Consulting and Advisory
