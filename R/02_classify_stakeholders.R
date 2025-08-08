@@ -17,11 +17,9 @@ infile  <- "data/climate_finance_survey_anonymized.csv"
 outfile <- "data/climate_finance_survey_classified.csv"
 verifyf <- "output/stakeholder_classification_verification.csv"
 
-stopifnot(file.exists(infile))
+if (!file.exists(infile)) stop("Anonymized input not found: ", infile)
 df <- read.csv(infile, stringsAsFactors = FALSE)
 if (!"ResponseId" %in% names(df)) df$ResponseId <- seq_len(nrow(df))
-
-# Make sure Q2.* exist (even if empty) and handle non-syntactic names safely
 if (!"Q2.1" %in% names(df))         df[["Q2.1"]]         <- NA_character_
 if (!"Q2.1_12_TEXT" %in% names(df)) df[["Q2.1_12_TEXT"]] <- NA_character_
 
@@ -33,59 +31,42 @@ to_lc <- function(x) ifelse(is.na(x) | x == "", NA_character_, stringr::str_to_l
 rx_any <- function(...) stringr::regex(paste0("(", paste0(..., collapse = "|"), ")"),
                                        ignore_case = TRUE)
 
-# ---- Mapping rules (predefined Q2.1 option) ----------------------------------
+# ---- Mapping rules (predefined Q2.1) -----------------------------------------
 map_predefined_role_vec <- function(role_value) {
   rl <- to_lc(role_value)
   case_when(
-    # Entrepreneur in Climate Tech (explicit or strongly implied)
     str_detect(rl, rx_any("entrepreneur","founder","co[- ]?founder")) &
       str_detect(rl, rx_any("climate","clean","green","sustain","energy","carbon","emission",
                             "renewable","solar","wind","electric","battery","hydrogen","bio")) ~
       "Entrepreneur in Climate Technology",
-
     str_detect(rl, rx_any("\\bventure capital\\b")) & !str_detect(rl, "corporate") ~
       "Venture Capital Firm",
-    str_detect(rl, "private equity")                                                   ~
-      "Private Equity Firm",
-    str_detect(rl, rx_any("high net","hnwi"))                                          ~
-      "High Net-Worth Individual",
-    str_detect(rl, rx_any("nonprofit","non-profit")) & !str_detect(rl, "philanthrop") ~
-      "Nonprofit Organization",
-    str_detect(rl, rx_any("academic","research institution","university"))            ~
-      "Academic or Research Institution",
-    str_detect(rl, rx_any("limited partner","\\blp\\b"))                               ~
-      "Limited Partner",
-    str_detect(rl, "family office")                                                    ~
-      "Family Office",
-    str_detect(rl, "corporate venture")                                                ~
-      "Corporate Venture Arm",
-    str_detect(rl, "angel investor")                                                   ~
-      "Angel Investor",
-    str_detect(rl, "esg investor")                                                     ~
-      "ESG Investor",
-    str_detect(rl, rx_any("government funding","government agency"))                   ~
-      "Government Funding Agency",
-    str_detect(rl, "philanthrop")                                                      ~
-      "Philanthropic Organization",
-    str_detect(rl, "\\bother\\b")                                                      ~
-      NA_character_,  # defer to free text
-    TRUE                                                                               ~
-      NA_character_
+    str_detect(rl, "private equity")                                                   ~ "Private Equity Firm",
+    str_detect(rl, rx_any("high net","hnwi"))                                          ~ "High Net-Worth Individual",
+    str_detect(rl, rx_any("nonprofit","non-profit")) & !str_detect(rl, "philanthrop") ~ "Nonprofit Organization",
+    str_detect(rl, rx_any("academic","research institution","university"))            ~ "Academic or Research Institution",
+    str_detect(rl, rx_any("limited partner","\\blp\\b"))                               ~ "Limited Partner",
+    str_detect(rl, "family office")                                                    ~ "Family Office",
+    str_detect(rl, "corporate venture")                                                ~ "Corporate Venture Arm",
+    str_detect(rl, "angel investor")                                                   ~ "Angel Investor",
+    str_detect(rl, "esg investor")                                                     ~ "ESG Investor",
+    str_detect(rl, rx_any("government funding","government agency"))                   ~ "Government Funding Agency",
+    str_detect(rl, "philanthrop")                                                      ~ "Philanthropic Organization",
+    str_detect(rl, "\\bother\\b")                                                      ~ NA_character_,  # defer to text
+    TRUE                                                                               ~ NA_character_
   )
 }
 
-# ---- Mapping rules (free text Q2.1_12_TEXT) -----------------------------------
+# ---- Mapping rules (free text in Q2.1_12_TEXT) --------------------------------
 categorize_free_text_vec <- function(text) {
   tx <- to_lc(text)
   case_when(
-    # Entrepreneur in Climate Technology FIRST (high priority)
     str_detect(tx, rx_any("founder","co[- ]?founder","\\bceo\\b.*startup","\\bcto\\b.*startup",
                           "started.*company","launching.*venture","entrepreneur")) &
     str_detect(tx, rx_any("climate","clean","green","sustain","energy","carbon","emission",
                           "renewable","solar","wind","electric","battery","hydrogen","bio")) ~
       "Entrepreneur in Climate Technology",
 
-    # Investment and Financial Services
     str_detect(tx, rx_any("investment bank","asset manager","fund manager","sovereign wealth",
                           "insurance company","private bank","debt fund","fintech","hedge fund",
                           "venture studio","commercial finance","private debt","impact investor",
@@ -93,59 +74,48 @@ categorize_free_text_vec <- function(text) {
                           "esg ratings","wealth management","green bond","blended finance")) ~
       "Investment and Financial Services",
 
-    # Legal Services
     str_detect(tx, rx_any("law firm","lawyer","attorney","solicitor","legal advisor","legal counsel",
                           "patent attorney","barrister")) ~
       "Legal Services",
 
-    # Business Consulting and Advisory
     str_detect(tx, rx_any("consult","advisor","advisory","strategist","m&a","management consulting",
                           "sustainability consultant","esg advisory")) &
       !str_detect(tx, rx_any("\\blaw\\b","legal","attorney")) ~
       "Business Consulting and Advisory",
 
-    # Corporate Entities
     str_detect(tx, rx_any("corporate","conglomerate","multinational","holding company","plc",
                           "gmbh","\\bag\\b","s\\.a\\.","incorporated","corporation","\\bltd\\b")) &
       !str_detect(tx, rx_any("venture","consult","\\blaw\\b")) ~
       "Corporate Entities",
 
-    # Manufacturing and Industrial
     str_detect(tx, rx_any("manufactur","industrial","factory","production","assembly","processing",
                           "engineering firm")) &
       !str_detect(tx, rx_any("consult","software")) ~
       "Manufacturing and Industrial",
 
-    # Energy and Infrastructure
     str_detect(tx, rx_any("renewable energy","power producer","energy services","utility","grid",
                           "infrastructure","solar developer","wind developer","hydro","geothermal",
                           "biomass","waste[- ]?to[- ]?energy")) ~
       "Energy and Infrastructure",
 
-    # Real Estate and Property
     str_detect(tx, rx_any("real estate","property","reit","building","housing","commercial property")) ~
       "Real Estate and Property",
 
-    # Technology and Software
     str_detect(tx, rx_any("software","saas","platform","tech company","technology","digital","data",
                           "\\bai\\b","artificial intelligence","blockchain","\\bapp\\b","application")) &
       !str_detect(tx, rx_any("consult","\\blaw\\b")) ~
       "Technology and Software",
 
-    # Media and Communication
     str_detect(tx, rx_any("media","communications","press","journalism","publication","broadcasting")) ~
       "Media and Communication",
 
-    # Philanthropic Organization
     str_detect(tx, rx_any("foundation","philanthropic","charitable trust","donor","grantmaker","giving")) ~
       "Philanthropic Organization",
 
-    # Nonprofit Organization
     str_detect(tx, rx_any("ngo","nonprofit","non-profit","charity","association","institute",
                           "advocacy","civil society")) ~
       "Nonprofit Organization",
 
-    # Government Funding Agency
     str_detect(tx, rx_any("government","public sector","ministry","department","agency","\\bdfi\\b",
                           "development finance","multilateral","bilateral","municipality","federal",
                           "state agency")) ~
@@ -155,7 +125,7 @@ categorize_free_text_vec <- function(text) {
   )
 }
 
-# ---- Vectorized classification -----------------------------------------------
+# ---- Vectorized classification ------------------------------------------------
 df <- df %>%
   mutate(
     q2       = `Q2.1`,
