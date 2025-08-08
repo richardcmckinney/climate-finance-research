@@ -63,6 +63,7 @@ output/
 !data/survey_responses_anonymized_basic.csv
 !data/survey_responses_anonymized_preliminary.csv
 !data/data_dictionary.csv
+!docs/appendix_j_classification_template.csv
 
 # Allow-list classification template in /docs
 !docs/appendix_j_classification_template.csv

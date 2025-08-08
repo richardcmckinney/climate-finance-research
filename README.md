@@ -32,8 +32,8 @@ This study surveyed 1,307 climate finance stakeholders (from 1,563 total survey 
 ```
 climate-finance-research/
 ├── data/                        # Anonymized survey data (safe to share)
-│   ├── climate_finance_survey_anonymized.csv         # Basic anonymized responses (N=1,563)
-│   ├── climate_finance_survey_classified.csv         # With stakeholder classifications (N=1,307)
+│   ├── survey_responses_anonymized_basic.csv           # Basic anonymized responses (N=1,563)
+│   ├── survey_responses_anonymized_preliminary.csv     # With stakeholder classifications (N=1,307)
 │   └── data_dictionary.csv                          # Variable descriptions and completeness
 ├── data_raw/                    # Original data with PII (NOT tracked by Git)
 ├── R/                           # Analysis scripts
@@ -159,7 +159,7 @@ install.packages(c(
 3. **View outputs**:
    - Figures: `figures/` directory
    - Tables: `output/` directory
-   - Classified data: `data/climate_finance_survey_classified.csv`
+   - Classified data: `data/survey_responses_anonymized_preliminary.csv`
 
 ## Key Findings Replication
 
@@ -277,8 +277,8 @@ git push -u origin main
 
 Check that these critical files are visible:
 - [ ] README.md with complete stakeholder distribution table
-- [ ] data/climate_finance_survey_anonymized.csv (N=1,563 total responses)
-- [ ] data/climate_finance_survey_classified.csv (N=1,307 classified responses)
+- [ ] data/survey_responses_anonymized_basic.csv (N=1,563 total responses)
+- [ ] data/survey_responses_anonymized_preliminary.csv (N=1,307 classified responses)
 - [ ] output/stakeholder_classification_verification.csv (audit trail)
 - [ ] All R scripts in R/
 - [ ] All figures in figures/
@@ -346,3 +346,32 @@ This repository provides full transparency for our research methodology. The cla
 The dual-coder validation process achieved high inter-rater reliability (κ = 0.92), and all classification decisions are documented in the `docs/appendix_j_methodology.md` file.
 
 **Note on Classification:** The "Miscellaneous and Individual Respondents" category (n=151, 11.6%) includes respondents whose roles did not fit clearly into the primary 22 categories. These include self-employed individuals, private investors, small business owners, and other professionals with climate finance involvement. This category ensures complete representation of all survey participants while maintaining the integrity of the main stakeholder classifications.
+
+---
+
+## Reproduce Everything With One Command
+
+**Quick start for reviewers:**
+
+```r
+source("run_all.R")
+```
+
+This executes:
+
+1. `R/01_anonymize_data.R` → writes
+   - `data/survey_responses_anonymized_basic.csv`
+   - `docs/appendix_j_classification_template.csv`
+   - `data/data_dictionary.csv`
+2. `R/02_classify_stakeholders.R` → writes
+   - `data/survey_responses_anonymized_preliminary.csv` (or `data/survey_responses_anonymized_classified.csv` if final mapping is present)
+
+### Determinism & Safety
+* All PII columns are removed by name and **all remaining free‑text is scrubbed** for emails, phone numbers, URLs, and @handles.
+* Outputs are deterministic; re-running on identical `data_raw/*.csv` produces identical files.
+
+### Expected public artifacts
+- `data/survey_responses_anonymized_basic.csv`
+- `docs/appendix_j_classification_template.csv`
+- `data/survey_responses_anonymized_preliminary.csv`
+- `data/data_dictionary.csv`

@@ -2,20 +2,42 @@
 # Enhanced, robust anonymization + Appendix J prep (optimized)
 # Works with Qualtrics headers like "Q2.1", "QID174", or long question text
 
-suppressPackageStartupMessages({
+suppresPackageStartupMessages({
   if (!"methods" %in% loadedNamespaces()) library(methods)
   library(tidyverse)
   library(lubridate)
   library(digest)
 })
 
+`%||%` <- function(a, b) if (is.null(a)) b else a
+
+# PII scrubbing of free-text (emails, phones, URLs, @handles)
+scrub_text <- function(x) {
+  if (!is.character(x)) return(x)
+  # emails
+  x <- gsub("(?i)[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}", "[REDACTED_EMAIL]", x, perl = TRUE)
+  # phone numbers (international and common formats)
+  x <- gsub("(?i)\n?\\+?\\d[\\\nd\\s().-]{7,}\n?", "[REDACTED_PHONE]", x, perl = TRUE)
+  # URLs
+  x <- gsub("(?i)(https?://\n?\n?\n?\n?\n?\n?\n?\n?\S+|www\\.[A-Za-z0-9.-]+\\.[A-Za-z]{2,}\\S*)", "[REDACTED_URL]", x, perl = TRUE)
+  # social handles like @username
+  x <- gsub("(^|\\s)@[A-Za-z0-9_]{2,15}\\b", "\\1[REDACTED_HANDLE]", x, perl = TRUE)
+  x
+}
+
 # ------------------------- Configuration -------------------------
 
 config <- list(
   pii_patterns = c(
-    "ip address", "email", "first name", "last name", "recipient",
-    "external.*reference", "latitude", "longitude", "\\bhq_?address",
-    "address line", "phone", "website", "contact", "full[_ ]?name"
+    "ip[_ ]?address|^IPAddress$",
+    "email|e[-_ ]?mail|RecipientEmail",
+    "first[ _]?name|last[ _]?name|full[_ ]?name",
+    "recipient|Recipient|ExternalDataReference|external.*reference",
+    "latitude|longitude|LocationLatitude|LocationLongitude",
+    "\\bhq_?address|address[ _]?line|street|city|state|zip|postal",
+    "phone|mobile|cell|tel|fax",
+    "website|url",
+    "^ResponseId$|^StartDate$|^EndDate$|^RecordedDate$"
   ),
   output_paths = list(
     basic       = "data/survey_responses_anonymized_basic.csv",
@@ -211,7 +233,8 @@ an_basic <- raw %>%
     -matches(pii_regex, ignore.case = TRUE),
     -any_of(c(col_start, col_end, col_record))
   ) %>%
-  relocate(respondent_id, .before = 1)
+  relocate(respondent_id, .before = 1) %>%
+  mutate(across(where(is.character), scrub_text))
 
 # Save basic anonymized
 readr::write_csv(an_basic, config$output_paths$basic)
@@ -228,7 +251,7 @@ if (!have_role) {
 } else {
   role_df <- tibble(
     respondent_id = an_basic$respondent_id,
-    role_raw      = raw[[col_role]] %||% NA_character_,
+    role_raw      = raw[[col_role]],
     role_other    = if (!is.na(col_role_other)) raw[[col_role_other]] else NA_character_
   )
 
@@ -275,9 +298,10 @@ cat("Anonymized columns:", ncol(an_basic), "\n")
 cat("Rows preserved:", nrow(an_basic), "\n")
 
 dict <- tibble(
-  variable_name   = names(an_basic),
-  type            = vapply(an_basic, function(x) class(x)[1], character(1)),
-  n_missing       = vapply(an_basic, function(x) sum(is.na(x)), integer(1))
+  column_name      = names(an_basic),
+  description      = "",
+  type             = vapply(an_basic, function(x) class(x)[1], character(1)),
+  n_missing        = vapply(an_basic, function(x) sum(is.na(x)), integer(1))
 ) %>%
   mutate(
     n_non_missing    = nrow(an_basic) - n_missing,
