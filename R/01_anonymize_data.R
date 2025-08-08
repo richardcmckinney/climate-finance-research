@@ -182,63 +182,71 @@ cat("Saved basic anonymized data ->", out_anon_basic, "\n")
 # For downstream steps
 anonymized_basic <- df
 
-# =============================================================================
-#  PART 2: PREPARE APPENDIX J CLASSIFICATION TEMPLATE
-# =============================================================================
-
+# === PART 2: PREPARING FOR APPENDIX J CLASSIFICATIONS ===
 cat("\n=== PART 2: PREPARING FOR APPENDIX J CLASSIFICATIONS ===\n")
 
-# Build template from Q2.1 + free text Q2.1_12_TEXT (when present)
-q_role  <- if ("Q2.1" %in% names(anonymized_basic))  "Q2.1" else NA_character_
-q_other <- if ("Q2.1_12_TEXT" %in% names(anonymized_basic)) "Q2.1_12_TEXT" else NA_character_
+# Helper: find first matching column name
+first_present <- function(nm, candidates_exact = character(), candidates_regex = character()) {
+  for (c in candidates_exact) if (c %in% nm) return(c)
+  for (rx in candidates_regex) {
+    hit <- grep(rx, nm, value = TRUE)
+    if (length(hit)) return(hit[1])
+  }
+  NULL
+}
 
-if (is.na(q_role)) {
-  cat("Warning: Q2.1 not found; classification template will be empty.\n")
+nm <- names(anonymized_basic)
+
+# Try multiple possibilities for role and other-text columns
+q_role <- first_present(
+  nm,
+  candidates_exact = c("Q2.1", "Q2_1", "QID174"),
+  candidates_regex = c("Which.*role.*SelectedChoice")
+)
+q_other <- first_present(
+  nm,
+  candidates_exact = c("Q2.1_12_TEXT", "Q2_1_12_TEXT"),
+  candidates_regex = c("Which.*role.*Other.*Text")
+)
+
+if (is.null(q_role)) {
+  warning("Role column not found; classification template will be empty.")
 }
 
 responses_to_classify <- anonymized_basic %>%
   mutate(
-    role_raw = if (!is.na(q_role))  .data[[q_role]]  else NA_character_,
-    role_other = if (!is.na(q_other)) .data[[q_other]] else NA_character_
+    role_raw   = if (!is.null(q_role))   .data[[q_role]]   else NA_character_,
+    role_other = if (!is.null(q_other))  .data[[q_other]]  else NA_character_
   ) %>%
   select(any_of(c("respondent_id", "role_raw", "role_other"))) %>%
-  filter(!is.na(role_raw) | !is.na(role_other))
+  filter(!if_all(everything(), ~ is.na(.x) | .x == ""))
 
-# A light preliminary bucket (can be refined)
-prelim_map <- function(x) {
-  if (is.na(x) || x == "") return(NA_character_)
-  y <- tolower(x)
-  case_when(
-    grepl("venture capital", y) & !grepl("corporate", y) ~ "Venture Capital Firm",
-    grepl("corporate venture", y)                        ~ "Corporate Venture Arm",
-    grepl("\\bangel\\b", y)                              ~ "Angel Investor",
-    grepl("private equity", y)                           ~ "Private Equity Firm",
-    grepl("family office", y)                            ~ "Family Office",
-    grepl("limited partner|\\blp\\b", y)                 ~ "Limited Partner",
-    grepl("philanthrop", y)                              ~ "Philanthropic Organization",
-    grepl("non.?profit|ngo|charit", y)                   ~ "Nonprofit Organization",
-    grepl("academic|research|universit", y)              ~ "Academic or Research Institution",
-    grepl("government|ministry|department|agency|dfi", y)~ "Government Funding Agency",
-    grepl("esg investor", y)                             ~ "ESG Investor",
-    grepl("entrepreneur|founder|startup", y)             ~ "Entrepreneur in Climate Technology",
-    TRUE ~ "Other"
-  )
-}
-
+# Vectorised preliminary mapping
 classification_template <- responses_to_classify %>%
   mutate(
-    original_response = role_raw,
-    other_text = role_other,
-    preliminary_category = coalesce(prelim_map(original_response),
-                                    ifelse(!is.na(other_text) & other_text != "", "NEEDS_CLASSIFICATION", NA_character_)),
+    preliminary_category = case_when(
+      str_detect(tolower(role_raw), "venture capital") & !str_detect(tolower(role_raw), "corporate") ~ "Venture Capital Firm",
+      str_detect(tolower(role_raw), "corporate venture")     ~ "Corporate Venture Arm",
+      str_detect(tolower(role_raw), "\\bangel\\b")           ~ "Angel Investor",
+      str_detect(tolower(role_raw), "private equity")        ~ "Private Equity Firm",
+      str_detect(tolower(role_raw), "family office")         ~ "Family Office",
+      str_detect(tolower(role_raw), "limited partner|\\blp\\b") ~ "Limited Partner",
+      str_detect(tolower(role_raw), "philanthrop")           ~ "Philanthropic Organization",
+      str_detect(tolower(role_raw), "non.?profit|ngo|charit") ~ "Nonprofit Organization",
+      str_detect(tolower(role_raw), "academic|research|universit") ~ "Academic or Research Institution",
+      str_detect(tolower(role_raw), "government|ministry|department|agency|\\bdfi\\b") ~ "Government Funding Agency",
+      str_detect(tolower(role_raw), "esg investor")          ~ "ESG Investor",
+      str_detect(tolower(role_raw), "entrepreneur|founder|startup") ~ "Entrepreneur in Climate Technology",
+      !is.na(role_other) & role_other != ""                  ~ "NEEDS_CLASSIFICATION",
+      TRUE                                                   ~ "Other"
+    ),
     final_category_appendix_j = NA_character_
   ) %>%
-  select(respondent_id, original_response, other_text,
+  select(respondent_id, role_raw, role_other,
          preliminary_category, final_category_appendix_j)
 
 write_csv(classification_template, out_template)
-cat("Classification template saved ->", out_template, "\n")
-cat("Complete this file per Appendix J methodology and save as:\n  ", basename(in_class_final), " in docs/\n", sep = "")
+cat("Classification template saved -> ", out_template, "\n")
 
 # =============================================================================
 #  PART 3: BUILD CLASSIFIED OUTPUT (preliminary or final if provided)
