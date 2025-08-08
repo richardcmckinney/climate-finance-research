@@ -1,190 +1,292 @@
 # 02_classify_stakeholders.R
-# Purpose: Classify stakeholders per Appendix J using Q2.1 and Q2.1_12_TEXT
-# Input : data/climate_finance_survey_anonymized.csv
-# Output: data/climate_finance_survey_classified.csv
-#         output/stakeholder_classification_verification.csv
+# Purpose: Produce stakeholder classifications per Appendix J methodology
+# Outputs:
+#   - docs/appendix_j_classification_template.csv
+#   - data/survey_responses_anonymized_preliminary.csv
 
-# ---- Libraries ---------------------------------------------------------------
-if (!"methods" %in% loadedNamespaces()) library(methods)
-suppressPackageStartupMessages(library(tidyverse))
+suppressPackageStartupMessages({
+  library(tidyverse)
+  library(stringr)
+})
 
-# ---- Folders -----------------------------------------------------------------
-dir.create("data",   recursive = TRUE, showWarnings = FALSE)
-dir.create("output", recursive = TRUE, showWarnings = FALSE)
+message("=== STAKEHOLDER CLASSIFICATION (APPENDIX J) ===")
 
-# ---- IO paths ----------------------------------------------------------------
-infile  <- "data/climate_finance_survey_anonymized.csv"
-outfile <- "data/climate_finance_survey_classified.csv"
-verifyf <- "output/stakeholder_classification_verification.csv"
+# --------------------------------------------------------------------
+# Config / paths
+# --------------------------------------------------------------------
+in_basic  <- "data/survey_responses_anonymized_basic.csv"
+out_template <- "docs/appendix_j_classification_template.csv"
+out_prelim   <- "data/survey_responses_anonymized_preliminary.csv"
 
-if (!file.exists(infile)) stop("Anonymized input not found: ", infile)
-df <- read.csv(infile, stringsAsFactors = FALSE)
-if (!"ResponseId" %in% names(df)) df$ResponseId <- seq_len(nrow(df))
-if (!"Q2.1" %in% names(df))         df[["Q2.1"]]         <- NA_character_
-if (!"Q2.1_12_TEXT" %in% names(df)) df[["Q2.1_12_TEXT"]] <- NA_character_
+# --------------------------------------------------------------------
+# Load data
+# --------------------------------------------------------------------
+stopifnot(file.exists(in_basic))
+df <- suppressMessages(read_csv(in_basic, show_col_types = FALSE))
 
-cat("Starting stakeholder classification...\n")
-cat("Total responses: ", nrow(df), "\n\n", sep = "")
-
-# ---- Helpers -----------------------------------------------------------------
-to_lc <- function(x) ifelse(is.na(x) | x == "", NA_character_, stringr::str_to_lower(x))
-rx_any <- function(...) stringr::regex(paste0("(", paste0(..., collapse = "|"), ")"),
-                                       ignore_case = TRUE)
-
-# ---- Mapping rules (predefined Q2.1) -----------------------------------------
-map_predefined_role_vec <- function(role_value) {
-  rl <- to_lc(role_value)
-  case_when(
-    str_detect(rl, rx_any("entrepreneur","founder","co[- ]?founder")) &
-      str_detect(rl, rx_any("climate","clean","green","sustain","energy","carbon","emission",
-                            "renewable","solar","wind","electric","battery","hydrogen","bio")) ~
-      "Entrepreneur in Climate Technology",
-    str_detect(rl, rx_any("\\bventure capital\\b")) & !str_detect(rl, "corporate") ~
-      "Venture Capital Firm",
-    str_detect(rl, "private equity")                                                   ~ "Private Equity Firm",
-    str_detect(rl, rx_any("high net","hnwi"))                                          ~ "High Net-Worth Individual",
-    str_detect(rl, rx_any("nonprofit","non-profit")) & !str_detect(rl, "philanthrop") ~ "Nonprofit Organization",
-    str_detect(rl, rx_any("academic","research institution","university"))            ~ "Academic or Research Institution",
-    str_detect(rl, rx_any("limited partner","\\blp\\b"))                               ~ "Limited Partner",
-    str_detect(rl, "family office")                                                    ~ "Family Office",
-    str_detect(rl, "corporate venture")                                                ~ "Corporate Venture Arm",
-    str_detect(rl, "angel investor")                                                   ~ "Angel Investor",
-    str_detect(rl, "esg investor")                                                     ~ "ESG Investor",
-    str_detect(rl, rx_any("government funding","government agency"))                   ~ "Government Funding Agency",
-    str_detect(rl, "philanthrop")                                                      ~ "Philanthropic Organization",
-    str_detect(rl, "\\bother\\b")                                                      ~ NA_character_,  # defer to text
-    TRUE                                                                               ~ NA_character_
-  )
+# Extract role columns (robustly)
+pick_col <- function(df, candidates) {
+  hits <- intersect(candidates, names(df))
+  if (length(hits)) df[[hits[1]]] else rep(NA_character_, nrow(df))
 }
 
-# ---- Mapping rules (free text in Q2.1_12_TEXT) --------------------------------
-categorize_free_text_vec <- function(text) {
-  tx <- to_lc(text)
-  case_when(
-    str_detect(tx, rx_any("founder","co[- ]?founder","\\bceo\\b.*startup","\\bcto\\b.*startup",
-                          "started.*company","launching.*venture","entrepreneur")) &
-    str_detect(tx, rx_any("climate","clean","green","sustain","energy","carbon","emission",
-                          "renewable","solar","wind","electric","battery","hydrogen","bio")) ~
-      "Entrepreneur in Climate Technology",
+role_raw <- pick_col(df, c(
+  "role_raw", "Q2.1",
+  "Which of the following best describes your role? (Please select the most appropriate option) - Selected Choice"
+))
 
-    str_detect(tx, rx_any("investment bank","asset manager","fund manager","sovereign wealth",
-                          "insurance company","private bank","debt fund","fintech","hedge fund",
-                          "venture studio","commercial finance","private debt","impact investor",
-                          "financial research","project finance","asset owner","pension fund",
-                          "esg ratings","wealth management","green bond","blended finance")) ~
-      "Investment and Financial Services",
+role_other <- pick_col(df, c(
+  "role_other", "Q2.1_12_TEXT",
+  "Which of the following best describes your role? (Please select the most appropriate option) - Other (please specify)  - Text"
+))
 
-    str_detect(tx, rx_any("law firm","lawyer","attorney","solicitor","legal advisor","legal counsel",
-                          "patent attorney","barrister")) ~
-      "Legal Services",
+respondent_id <- pick_col(df, c("respondent_id", "ResponseId", "_recordId", "response_id"))
 
-    str_detect(tx, rx_any("consult","advisor","advisory","strategist","m&a","management consulting",
-                          "sustainability consultant","esg advisory")) &
-      !str_detect(tx, rx_any("\\blaw\\b","legal","attorney")) ~
-      "Business Consulting and Advisory",
+# --------------------------------------------------------------------
+# Classification Functions
+# --------------------------------------------------------------------
 
-    str_detect(tx, rx_any("corporate","conglomerate","multinational","holding company","plc",
-                          "gmbh","\\bag\\b","s\\.a\\.","incorporated","corporation","\\bltd\\b")) &
-      !str_detect(tx, rx_any("venture","consult","\\blaw\\b")) ~
-      "Corporate Entities",
-
-    str_detect(tx, rx_any("manufactur","industrial","factory","production","assembly","processing",
-                          "engineering firm")) &
-      !str_detect(tx, rx_any("consult","software")) ~
-      "Manufacturing and Industrial",
-
-    str_detect(tx, rx_any("renewable energy","power producer","energy services","utility","grid",
-                          "infrastructure","solar developer","wind developer","hydro","geothermal",
-                          "biomass","waste[- ]?to[- ]?energy")) ~
-      "Energy and Infrastructure",
-
-    str_detect(tx, rx_any("real estate","property","reit","building","housing","commercial property")) ~
-      "Real Estate and Property",
-
-    str_detect(tx, rx_any("software","saas","platform","tech company","technology","digital","data",
-                          "\\bai\\b","artificial intelligence","blockchain","\\bapp\\b","application")) &
-      !str_detect(tx, rx_any("consult","\\blaw\\b")) ~
-      "Technology and Software",
-
-    str_detect(tx, rx_any("media","communications","press","journalism","publication","broadcasting")) ~
-      "Media and Communication",
-
-    str_detect(tx, rx_any("foundation","philanthropic","charitable trust","donor","grantmaker","giving")) ~
-      "Philanthropic Organization",
-
-    str_detect(tx, rx_any("ngo","nonprofit","non-profit","charity","association","institute",
-                          "advocacy","civil society")) ~
-      "Nonprofit Organization",
-
-    str_detect(tx, rx_any("government","public sector","ministry","department","agency","\\bdfi\\b",
-                          "development finance","multilateral","bilateral","municipality","federal",
-                          "state agency")) ~
-      "Government Funding Agency",
-
-    TRUE ~ "Miscellaneous and Individual Respondents"
-  )
+# Normalize text for matching
+normalize_text <- function(x) {
+  x %>%
+    str_replace_all("\\s+", " ") %>%
+    str_trim() %>%
+    tolower() %>%
+    str_replace_all("[^a-z0-9 ]", " ") %>%
+    str_squish()
 }
 
-# ---- Vectorized classification ------------------------------------------------
-df <- df %>%
+# Comprehensive classification based on Appendix J methodology
+classify_stakeholder <- function(raw_text, other_text) {
+  # Combine both texts for analysis
+  combined <- paste(
+    ifelse(is.na(raw_text), "", raw_text),
+    ifelse(is.na(other_text), "", other_text),
+    sep = " "
+  ) %>% normalize_text()
+  
+  if (nchar(combined) == 0) return("Miscellaneous and Individual Respondents")
+  
+  # Priority order classification based on Appendix J
+  
+  # 1. Entrepreneur in Climate Technology (highest priority for climate-specific)
+  if (str_detect(combined, "(?=.*(entrepreneur|founder|co[- ]?founder|ceo|cto|startup|venture\\s*builder|launching|started)).*(?=.*(climate|clean|green|sustain|carbon|emission|renewable|solar|wind|battery|storage|hydrogen|bio|ccus|adapt|energy|electric|environmental))")) {
+    return("Entrepreneur in Climate Technology")
+  }
+  
+  # 2. Government and Public Sector
+  if (str_detect(combined, "dfi|development\\s*finance|multilateral|bilateral|government|ministry|department|agency|municipal|federal|state|public\\s*sector|public\\s*pension|nhs")) {
+    return("Government Funding Agency")
+  }
+  
+  # 3. Specific investor types (check before generic terms)
+  if (str_detect(combined, "corporate\\s*venture") && !str_detect(combined, "law|legal|consult")) {
+    return("Corporate Venture Arm")
+  }
+  
+  if (str_detect(combined, "venture\\s*capital|\\bvc\\b") && !str_detect(combined, "corporate|law")) {
+    return("Venture Capital Firm")
+  }
+  
+  if (str_detect(combined, "private\\s*equity|\\bpe\\b") && !str_detect(combined, "backed|owned")) {
+    return("Private Equity Firm")
+  }
+  
+  if (str_detect(combined, "angel\\s*investor")) {
+    return("Angel Investor")
+  }
+  
+  if (str_detect(combined, "limited\\s*partner|\\blp\\b")) {
+    return("Limited Partner")
+  }
+  
+  if (str_detect(combined, "family\\s*office")) {
+    return("Family Office")
+  }
+  
+  if (str_detect(combined, "high\\s*net|hnwi|retired.*wealthy")) {
+    return("High Net-Worth Individual")
+  }
+  
+  if (str_detect(combined, "esg\\s*investor|impact\\s*invest|sustainability\\s*invest")) {
+    return("ESG Investor")
+  }
+  
+  # 4. Organizations
+  if (str_detect(combined, "foundation|philanthrop|charitable|donor|grantmaker|giving\\s*fund") && 
+      !str_detect(combined, "nhs|trust\\s*beneficiary")) {
+    return("Philanthropic Organization")
+  }
+  
+  if (str_detect(combined, "nonprofit|non[- ]?profit|ngo|charity|civil\\s*society|association") && 
+      !str_detect(combined, "law|consult")) {
+    return("Nonprofit Organization")
+  }
+  
+  if (str_detect(combined, "university|academic|research\\s*(center|institute|institution)|\\blab\\b")) {
+    return("Academic or Research Institution")
+  }
+  
+  # 5. Financial Services (broader category)
+  if (str_detect(combined, "investment\\s*bank|asset\\s*manage|fund\\s*manage|sovereign\\s*wealth|insurance|private\\s*bank|hedge\\s*fund|debt\\s*fund|pension\\s*fund|financial|fintech|wealth\\s*manage")) {
+    return("Investment and Financial Services")
+  }
+  
+  # 6. Professional Services
+  if (str_detect(combined, "law\\s*firm|lawyer|attorney|solicitor|legal|barrister|patent\\s*attorney")) {
+    return("Legal Services")
+  }
+  
+  if (str_detect(combined, "consult|advis|strategy|strategist|m\\s*&\\s*a|management\\s*consult")) {
+    return("Business Consulting and Advisory")
+  }
+  
+  # 7. Sector-specific
+  if (str_detect(combined, "utility|grid|renewable\\s*energy|power\\s*producer|ipp|solar\\s*develop|wind\\s*develop|infrastructure|energy\\s*service")) {
+    return("Energy and Infrastructure")
+  }
+  
+  if (str_detect(combined, "manufactur|industrial|factory|production|engineering\\s*firm|steel|chemical")) {
+    return("Manufacturing and Industrial")
+  }
+  
+  if (str_detect(combined, "real\\s*estate|property|reit|building|housing|commercial\\s*property")) {
+    return("Real Estate and Property")
+  }
+  
+  if (str_detect(combined, "software|saas|platform|tech\\s*company|technology|digital|blockchain|\\bai\\b|artificial\\s*intelligence")) {
+    return("Technology and Software")
+  }
+  
+  if (str_detect(combined, "media|press|publication|broadcast|communication|journalism")) {
+    return("Media and Communication")
+  }
+  
+  # 8. Generic Corporate
+  if (str_detect(combined, "corporate|company|conglomerate|multinational|holding|plc|gmbh|ltd|llc|inc")) {
+    return("Corporate Entities")
+  }
+  
+  # 9. Individual/Small Business
+  if (str_detect(combined, "entrepreneur|founder|business\\s*owner|self\\s*employ|startup") && 
+      !str_detect(combined, "climate|clean|green")) {
+    return("Miscellaneous and Individual Respondents")
+  }
+  
+  # Default
+  return("Miscellaneous and Individual Respondents")
+}
+
+# --------------------------------------------------------------------
+# Apply Classification
+# --------------------------------------------------------------------
+
+# Create classification data frame
+cls <- tibble(
+  respondent_id = respondent_id,
+  role_raw  = role_raw,
+  role_other = role_other
+) %>%
   mutate(
-    q2       = `Q2.1`,
-    q2_text  = `Q2.1_12_TEXT`,
-    from_q2  = map_predefined_role_vec(q2),
-    from_txt = ifelse(is.na(from_q2), categorize_free_text_vec(q2_text), NA_character_),
-    Final_Role_Category = coalesce(from_q2, from_txt,
-                                   "Miscellaneous and Individual Respondents")
+    role_raw_norm   = normalize_text(role_raw),
+    role_other_norm = normalize_text(role_other)
+  )
+
+classification_df <- cls %>%
+  mutate(
+    # Check if "Other (please specify)" was selected
+    needs_harmonization = !is.na(role_raw) & str_detect(coalesce(role_raw_norm, ""), "other.*please.*specify"),
+    # Apply classification on original text (function normalizes internally)
+    preliminary_category = map2_chr(role_raw, role_other, classify_stakeholder),
+    # For the template, final category starts as preliminary
+    final_category_appendix_j = preliminary_category
   ) %>%
-  select(-from_q2, -from_txt)
+  mutate(
+    final_category_appendix_j = case_when(
+      is.na(final_category_appendix_j) ~ "Miscellaneous and Individual Respondents",
+      final_category_appendix_j == "" ~ "Miscellaneous and Individual Respondents",
+      TRUE ~ final_category_appendix_j
+    )
+  )
 
-# ---- Summary + Appendix-J comparison -----------------------------------------
-cat("\n=== CLASSIFICATION RESULTS ===\n")
-role_summary <- sort(table(df$Final_Role_Category, useNA = "ifany"), decreasing = TRUE)
-summary_df <- data.frame(
-  Category   = names(role_summary),
-  Count      = as.numeric(role_summary),
-  Percentage = round(as.numeric(role_summary) / sum(role_summary) * 100, 1)
-)
-print(summary_df)
+# --------------------------------------------------------------------
+# Quality checks and adjustments
+# --------------------------------------------------------------------
 
-expected <- data.frame(
-  Category = c("Entrepreneur in Climate Technology","Venture Capital Firm",
-               "Investment and Financial Services","Private Equity Firm",
-               "Business Consulting and Advisory","Nonprofit Organization",
-               "High Net-Worth Individual","Government Funding Agency",
-               "Academic or Research Institution","Limited Partner","Family Office",
-               "Corporate Venture Arm","Angel Investor","ESG Investor","Legal Services",
-               "Corporate Entities","Manufacturing and Industrial","Energy and Infrastructure",
-               "Real Estate and Property","Philanthropic Organization","Technology and Software",
-               "Media and Communication","Miscellaneous and Individual Respondents"),
-  Expected = c(159,117,109,88,79,73,66,53,52,49,48,47,43,38,38,35,25,24,20,19,19,7,151)
-)
+# Additional refinements for specific known patterns
+classification_df <- classification_df %>%
+  mutate(
+    final_category_appendix_j = case_when(
+      str_detect(coalesce(role_other_norm, ""), "venture\\s*studio") & needs_harmonization ~ "Business Consulting and Advisory",
+      str_detect(coalesce(role_other_norm, ""), "dfi|development\\s*finance\\s*institution") & needs_harmonization ~ "Government Funding Agency",
+      str_detect(coalesce(role_other_norm, ""), "single\\s*family\\s*office") & needs_harmonization ~ "Family Office",
+      str_detect(coalesce(role_other_norm, ""), "law\\s*firm") & needs_harmonization ~ "Legal Services",
+      str_detect(coalesce(role_other_norm, ""), "hedge\\s*fund") & needs_harmonization ~ "Investment and Financial Services",
+      str_detect(coalesce(role_other_norm, ""), "sovereign\\s*wealth") & needs_harmonization ~ "Investment and Financial Services",
+      str_detect(coalesce(role_other_norm, ""), "pension\\s*fund") & needs_harmonization ~ "Investment and Financial Services",
+      str_detect(coalesce(role_other_norm, ""), "investment\\s*bank") & needs_harmonization ~ "Investment and Financial Services",
+      TRUE ~ final_category_appendix_j
+    )
+  )
 
-comparison <- merge(expected, summary_df, by = "Category", all = TRUE)
-comparison[is.na(comparison)] <- 0
-comparison$Difference <- comparison$Count - comparison$Expected
+# --------------------------------------------------------------------
+# Save outputs
+# --------------------------------------------------------------------
 
-cat("\n=== COMPARISON WITH EXPECTED (APPENDIX J) ===\n")
-print(comparison[order(-comparison$Count), ])
+# Template for manual review
+template <- classification_df %>%
+  arrange(desc(needs_harmonization), respondent_id)
 
-# ---- Persist outputs ----------------------------------------------------------
-write.csv(df, outfile, row.names = FALSE)
-cat("\n=== FILE SAVED ===\nClassified data → ", outfile, "\n", sep = "")
+dir.create(dirname(out_template), showWarnings = FALSE, recursive = TRUE)
+dir.create(dirname(out_prelim),   showWarnings = FALSE, recursive = TRUE)
 
-verification_df <- df[, c("ResponseId","Q2.1","Q2.1_12_TEXT","Final_Role_Category")]
-write.csv(verification_df, verifyf, row.names = FALSE)
-cat("Verification file → ", verifyf, "\n", sep = "")
+write_csv(template, out_template)
+message("Template saved to: ", normalizePath(out_template))
 
-# ---- Deterministic sample of 'Other' mappings --------------------------------
-set.seed(1307)
-cat("\n=== SAMPLE CLASSIFICATIONS (from 'Other' free text) ===\n")
-other_responses <- df[!is.na(df$`Q2.1_12_TEXT`) & df$`Q2.1_12_TEXT` != "",
-                      c("Q2.1_12_TEXT","Final_Role_Category")]
-if (nrow(other_responses) > 0) {
-  sample_idx <- head(sample(seq_len(nrow(other_responses))), 10)
-  print(other_responses[sample_idx, ])
+# Join back to full dataset
+df_prelim <- df %>%
+  left_join(
+    classification_df %>% 
+      select(respondent_id, preliminary_category, final_category_appendix_j),
+    by = "respondent_id"
+  )
+
+write_csv(df_prelim, out_prelim)
+message("Preliminary data saved to: ", normalizePath(out_prelim))
+
+# --------------------------------------------------------------------
+# Summary Statistics
+# --------------------------------------------------------------------
+
+message("\n=== CLASSIFICATION SUMMARY ===")
+
+# Overall distribution
+summary_stats <- classification_df %>%
+  count(final_category_appendix_j, sort = TRUE) %>%
+  mutate(percentage = round(n / sum(n) * 100, 1))
+
+print(summary_stats, n = 30)
+
+message("\n=== HARMONIZATION STATISTICS ===")
+message("Total responses: ", nrow(classification_df))
+message("Needs harmonization: ", sum(classification_df$needs_harmonization, na.rm = TRUE))
+message("Direct classification: ", sum(!classification_df$needs_harmonization, na.rm = TRUE))
+
+# Validation check - ensure no NAs in final category
+na_count <- sum(is.na(classification_df$final_category_appendix_j))
+if (na_count > 0) {
+  warning("Found ", na_count, " NA values in final_category_appendix_j!")
+} else {
+  message("\n✓ All records have valid final categories")
 }
 
-cat("\n✓ Stakeholder classification completed successfully\n")
-cat("Total classified responses: ", sum(!is.na(df$Final_Role_Category)), "\n", sep = "")
-cat("Unclassified responses: ", sum(is.na(df$Final_Role_Category)), "\n", sep = "")
+# Sample of harmonized entries for verification
+message("\n=== SAMPLE HARMONIZED ENTRIES ===")
+harmonized_sample <- classification_df %>%
+  filter(needs_harmonization) %>%
+  select(role_other, final_category_appendix_j) %>%
+  slice_sample(n = min(10, sum(classification_df$needs_harmonization, na.rm = TRUE)))
+
+print(harmonized_sample)
+
+message("\n✓ Classification complete!")
