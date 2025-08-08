@@ -27,3 +27,42 @@ output/
 
 # Logs
 *.log
+# R project files
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+
+# OAuth tokens
+.httr-oauth
+
+# System files
+.DS_Store
+
+# Quarto
+.quarto
+
+# Raw input data (never commit PII)
+data_raw/
+
+# Workspace data files (binary)
+*.RData
+*.rds
+
+# Build / derived artifacts
+output/
+*.log
+
+# ----------------------------
+# Versioned data & docs policy
+# ----------------------------
+# We keep key CSVs under version control for reproducibility.
+# (Do NOT add raw or sensitive sources here.)
+
+# Allow-list important CSVs in /data
+!data/survey_responses_anonymized_basic.csv
+!data/survey_responses_anonymized_preliminary.csv
+!data/data_dictionary.csv
+
+# Allow-list classification template in /docs
+!docs/appendix_j_classification_template.csv
