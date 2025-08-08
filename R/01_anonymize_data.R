@@ -1,40 +1,35 @@
-verify_outputs <- function(outputs) {
-  # ... existing code ...
+<file name=0 path=/Users/rmckinney/Documents/GitHub/climate-finance-research/R/01_anonymize_data.R>an_basic <- raw %>%
+  # ... previous transformations ...
+  relocate(respondent_id, .before = 1)
 
-  # After dictionary equality check success line
-  cli::cli_alert_success("Dictionary columns exactly match anonymized_basic (names and order).")
-
-  # Duplicate check in basic dataset
-  if ("respondent_id" %in% names(basic)) {
-    tab_basic <- table(basic$respondent_id)
-    dup_basic <- sum(tab_basic[tab_basic > 1] - 1)
-    if (dup_basic > 0) {
-      stop(sprintf("%d duplicate respondent_id(s) found in anonymized_basic. Example IDs: %s",
-                   dup_basic, paste(head(names(tab_basic[tab_basic > 1]), 10), collapse = ", ")))
-    } else {
-      cli::cli_alert_success("No duplicate respondent_id in anonymized_basic.")
-    }
-  }
-
-  # ... existing code ...
-
-  if (file.exists(prelim_path)) {
-    prelim <- readr::read_csv(prelim_path, show_col_types = FALSE)
-
-    # Duplicate check in preliminary dataset
-    if ("respondent_id" %in% names(prelim)) {
-      tab_pre <- table(prelim$respondent_id)
-      dup_pre <- sum(tab_pre[tab_pre > 1] - 1)
-      if (dup_pre > 0) {
-        stop(sprintf("%d duplicate respondent_id(s) found in preliminary dataset (extra rows beyond first). Example IDs: %s",
-                     dup_pre, paste(head(names(tab_pre[tab_pre > 1]), 10), collapse = ", ")))
-      } else {
-        cli::cli_alert_success("No duplicate respondent_id in preliminary dataset.")
-      }
-    }
-
-    # ... existing code ...
-  }
-
-  # ... existing code ...
+# Scrub PII in character columns EXCEPT respondent_id (to preserve deterministic keys)
+char_cols <- names(an_basic)[vapply(an_basic, is.character, logical(1))]
+char_cols <- setdiff(char_cols, "respondent_id")
+if (length(char_cols)) {
+  an_basic <- an_basic %>% mutate(across(all_of(char_cols), scrub_text))
 }
+</file>
+
+<file name=0 path=/Users/rmckinney/Documents/GitHub/climate-finance-research/R/02_classify_stakeholders.R>template <- role_df %>%
+  mutate(preliminary_category = case_when(
+    role %in% c("Investor", "Asset Manager", "Pension Fund") ~ "Investor",
+    role %in% c("Company", "Corporate") ~ "Company",
+    TRUE ~ "Other"
+  ))
+
+template <- template %>% arrange(respondent_id) %>% distinct(respondent_id, .keep_all = TRUE)
+
+out_prelim <- an_basic %>%
+  left_join(template %>% select(respondent_id, preliminary_category), by = "respondent_id") %>%
+  rename(stakeholder_category = preliminary_category) %>%
+  arrange(respondent_id) %>%
+  distinct(respondent_id, .keep_all = TRUE)
+
+out_class <- an_basic %>%
+  left_join(template %>% select(respondent_id, preliminary_category), by = "respondent_id") %>%
+  left_join(final_map, by = "respondent_id") %>%
+  mutate(stakeholder_category = coalesce(final_category_appendix_j, preliminary_category)) %>%
+  select(-preliminary_category, -final_category_appendix_j) %>%
+  arrange(respondent_id) %>%
+  distinct(respondent_id, .keep_all = TRUE)
+</file>
