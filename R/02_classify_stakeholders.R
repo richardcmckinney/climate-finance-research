@@ -70,21 +70,28 @@ classify_stakeholder <- function(raw_text, other_text) {
   # Priority order classification based on Appendix J
   
   # 1. Entrepreneur in Climate Technology (highest priority for climate-specific)
-  if (str_detect(combined, "(?=.*(entrepreneur|founder|co[- ]?founder|ceo|cto|startup|venture\\s*builder|launching|started)).*(?=.*(climate|clean|green|sustain|carbon|emission|renewable|solar|wind|battery|storage|hydrogen|bio|ccus|adapt|energy|electric|environmental))")) {
+  # Expanded to catch more climate-related entrepreneurs
+  if (str_detect(combined, "(?=.*(entrepreneur|founder|co[- ]?founder|ceo|cto|startup|venture\\s*builder|launching|started)).*(?=.*(climate|clean|green|sustain|carbon|emission|renewable|solar|wind|battery|storage|hydrogen|bio|ccus|adapt|energy|electric|environmental|esg))")) {
     return("Entrepreneur in Climate Technology")
   }
   
-  # 2. Government and Public Sector
-  if (str_detect(combined, "dfi|development\\s*finance|multilateral|bilateral|government|ministry|department|agency|municipal|federal|state|public\\s*sector|public\\s*pension|nhs")) {
+  # 2. Real Estate - Move this BEFORE Government to avoid misclassification
+  if (str_detect(combined, "real\\s*estate|property\\s*developer|property\\s*investor|reit|commercial\\s*property|industrial\\s*real\\s*estate")) {
+    return("Real Estate and Property")
+  }
+  
+  # 3. Government and Public Sector - MORE SPECIFIC PATTERNS
+  # Remove generic "agency" and "department" - require more context
+  if (str_detect(combined, "dfi\\b|development\\s*finance\\s*institution|multilateral\\s*(development|organization|bank)|bilateral|government\\s+(agency|funding|organization)|ministry|federal\\s+(agency|government)|state\\s+(agency|government)|municipal|public\\s*sector|public\\s*pension|\\bnhs\\b")) {
     return("Government Funding Agency")
   }
   
-  # 3. Specific investor types (check before generic terms)
+  # 4. Specific investor types (check before generic terms)
   if (str_detect(combined, "corporate\\s*venture") && !str_detect(combined, "law|legal|consult")) {
     return("Corporate Venture Arm")
   }
   
-  if (str_detect(combined, "venture\\s*capital|\\bvc\\b") && !str_detect(combined, "corporate|law")) {
+  if (str_detect(combined, "venture\\s*capital|\\bvc\\b|venture\\s*firm") && !str_detect(combined, "corporate|law")) {
     return("Venture Capital Firm")
   }
   
@@ -100,7 +107,7 @@ classify_stakeholder <- function(raw_text, other_text) {
     return("Limited Partner")
   }
   
-  if (str_detect(combined, "family\\s*office")) {
+  if (str_detect(combined, "family\\s*office|single\\s*family\\s*office")) {
     return("Family Office")
   }
   
@@ -108,12 +115,12 @@ classify_stakeholder <- function(raw_text, other_text) {
     return("High Net-Worth Individual")
   }
   
-  if (str_detect(combined, "esg\\s*investor|impact\\s*invest|sustainability\\s*invest")) {
+  if (str_detect(combined, "esg\\s*investor|impact\\s*invest|sustainability\\s*invest|impact\\s*first")) {
     return("ESG Investor")
   }
   
-  # 4. Organizations
-  if (str_detect(combined, "foundation|philanthrop|charitable|donor|grantmaker|giving\\s*fund") && 
+  # 5. Organizations
+  if (str_detect(combined, "foundation|philanthrop|charitable|donor|grantmaker|giving\\s*fund|community\\s*foundation") && 
       !str_detect(combined, "nhs|trust\\s*beneficiary")) {
     return("Philanthropic Organization")
   }
@@ -127,34 +134,33 @@ classify_stakeholder <- function(raw_text, other_text) {
     return("Academic or Research Institution")
   }
   
-  # 5. Financial Services (broader category)
-  if (str_detect(combined, "investment\\s*bank|asset\\s*manage|fund\\s*manage|sovereign\\s*wealth|insurance|private\\s*bank|hedge\\s*fund|debt\\s*fund|pension\\s*fund|financial|fintech|wealth\\s*manage")) {
+  # 6. Financial Services (broader category)
+  if (str_detect(combined, "investment\\s*bank|asset\\s*manage|fund\\s*manage|sovereign\\s*wealth|insurance|private\\s*bank|hedge\\s*fund|debt\\s*fund|pension\\s*fund|financial\\s*(advisor|advisory|holding|infrastructure)|fintech|wealth\\s*manage|alternative\\s*asset|permanent\\s*capital|securitized.*projects")) {
     return("Investment and Financial Services")
   }
   
-  # 6. Professional Services
-  if (str_detect(combined, "law\\s*firm|lawyer|attorney|solicitor|legal|barrister|patent\\s*attorney")) {
+  # 7. Professional Services
+  if (str_detect(combined, "law\\s*firm|lawyer|attorney|solicitor|legal|barrister|patent\\s*attorney|law\\s*office")) {
     return("Legal Services")
   }
   
-  if (str_detect(combined, "consult|advis|strategy|strategist|m\\s*&\\s*a|management\\s*consult")) {
+  # Fixed to catch venture studios and consultant agencies properly
+  if (str_detect(combined, "consult|advis|strategy|strategist|m\\s*&\\s*a|management\\s*consult|venture\\s*studio|consultant\\s*agency")) {
     return("Business Consulting and Advisory")
   }
   
-  # 7. Sector-specific
-  if (str_detect(combined, "utility|grid|renewable\\s*energy|power\\s*producer|ipp|solar\\s*develop|wind\\s*develop|infrastructure|energy\\s*service")) {
+  # 8. Sector-specific
+  # Enhanced to catch utility governance and energy-related roles
+  if (str_detect(combined, "utility|utlity|grid|renewable\\s*energy|power\\s*producer|ipp|solar\\s*develop|wind\\s*develop|infrastructure\\s*fund|energy\\s*(service|firm|sector)|electric\\s*cooperative|gas\\s*transmission|climate\\s*adaptive\\s*infrastructure")) {
     return("Energy and Infrastructure")
   }
   
-  if (str_detect(combined, "manufactur|industrial|factory|production|engineering\\s*firm|steel|chemical")) {
+  # Fixed to catch typos like "manurfacturing"
+  if (str_detect(combined, "manufactur|manurfactur|industrial|factory|production|engineering\\s*firm|steel|chemical|packaging|mineral\\s*exploration|mfg\\s*company")) {
     return("Manufacturing and Industrial")
   }
   
-  if (str_detect(combined, "real\\s*estate|property|reit|building|housing|commercial\\s*property")) {
-    return("Real Estate and Property")
-  }
-  
-  if (str_detect(combined, "software|saas|platform|tech\\s*company|technology|digital|blockchain|\\bai\\b|artificial\\s*intelligence")) {
+  if (str_detect(combined, "software|saas|platform|tech\\s*company|technology|digital|blockchain|\\bai\\b|artificial\\s*intelligence|biotech|fintech\\s*start\\s*up|clean\\s*tech\\s*company")) {
     return("Technology and Software")
   }
   
@@ -162,14 +168,19 @@ classify_stakeholder <- function(raw_text, other_text) {
     return("Media and Communication")
   }
   
-  # 8. Generic Corporate
-  if (str_detect(combined, "corporate|company|conglomerate|multinational|holding|plc|gmbh|ltd|llc|inc")) {
+  # 9. Generic Corporate - should come later to catch more specific patterns first
+  if (str_detect(combined, "corporate|company|conglomerate|multinational|holding|plc|gmbh|ltd|llc|inc|limited\\s*company|publicly\\s*listed|privately\\s*held")) {
     return("Corporate Entities")
   }
   
-  # 9. Individual/Small Business
-  if (str_detect(combined, "entrepreneur|founder|business\\s*owner|self\\s*employ|startup") && 
-      !str_detect(combined, "climate|clean|green")) {
+  # 10. Translation and other service businesses - more specific
+  if (str_detect(combined, "translation\\s*agency")) {
+    return("Miscellaneous and Individual Respondents")
+  }
+  
+  # 11. Individual/Small Business
+  if (str_detect(combined, "entrepreneur|founder|business\\s*owner|self\\s*employ|startup|small\\s*business") && 
+      !str_detect(combined, "climate|clean|green|sustain|esg")) {
     return("Miscellaneous and Individual Respondents")
   }
   
@@ -214,17 +225,32 @@ classification_df <- cls %>%
 # --------------------------------------------------------------------
 
 # Additional refinements for specific known patterns
+# These override the general classification for very specific cases
 classification_df <- classification_df %>%
   mutate(
     final_category_appendix_j = case_when(
+      # Venture studios are business consulting
       str_detect(coalesce(role_other_norm, ""), "venture\\s*studio") & needs_harmonization ~ "Business Consulting and Advisory",
-      str_detect(coalesce(role_other_norm, ""), "dfi|development\\s*finance\\s*institution") & needs_harmonization ~ "Government Funding Agency",
+      
+      # DFI specifically is Government Funding
+      str_detect(coalesce(role_other_norm, ""), "\\bdfi\\b|development\\s*finance\\s*institution") & needs_harmonization ~ "Government Funding Agency",
+      
+      # Single family office
       str_detect(coalesce(role_other_norm, ""), "single\\s*family\\s*office") & needs_harmonization ~ "Family Office",
+      
+      # Law firms
       str_detect(coalesce(role_other_norm, ""), "law\\s*firm") & needs_harmonization ~ "Legal Services",
+      
+      # Financial services refinements
       str_detect(coalesce(role_other_norm, ""), "hedge\\s*fund") & needs_harmonization ~ "Investment and Financial Services",
       str_detect(coalesce(role_other_norm, ""), "sovereign\\s*wealth") & needs_harmonization ~ "Investment and Financial Services",
       str_detect(coalesce(role_other_norm, ""), "pension\\s*fund") & needs_harmonization ~ "Investment and Financial Services",
       str_detect(coalesce(role_other_norm, ""), "investment\\s*bank") & needs_harmonization ~ "Investment and Financial Services",
+      
+      # Real estate specific override
+      str_detect(coalesce(role_other_norm, ""), "real\\s*estate") & needs_harmonization ~ "Real Estate and Property",
+      
+      # Keep the final category otherwise
       TRUE ~ final_category_appendix_j
     )
   )
