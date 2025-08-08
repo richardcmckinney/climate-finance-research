@@ -8,6 +8,8 @@
 ###############################################################################
 # Configuration
 ###############################################################################
+if (!"methods" %in% loadedNamespaces()) library(methods)
+
 # Input directory for raw Qualtrics export (CSV)
 RAW_DIR <- "data_raw"
 
