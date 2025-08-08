@@ -1,320 +1,325 @@
+# =============================================================================
 # 01_anonymize_data.R
 # Enhanced Data Anonymization Script for Climate Finance Survey
 # Author: Richard McKinney
 # Date: 2025-08-08
-# Purpose: Create anonymized versions of survey data with and without classifications
-
+#
+# Purpose:
+#   - Load raw Qualtrics export (all columns as character)
+#   - Create a stable respondent_id from whatever ID column exists
+#   - Strip PII + raw identifiers
+#   - Coerce dates to year-month safely (handles many formats & empty cells)
+#   - Coarsen geography to regions
+#   - Emit:
+#       data/survey_responses_anonymized_basic.csv
+#       data/data_dictionary.csv
+#       docs/appendix_j_classification_template.csv
+#       data/survey_responses_anonymized_{classified|preliminary}.csv
 # =============================================================================
-# Libraries (quiet + Rscript-safe)
-# =============================================================================
-if (!"methods" %in% loadedNamespaces()) library(methods)
 
 suppressPackageStartupMessages({
-  library(readr)
-  library(dplyr)
-  library(stringr)
-  library(purrr)
+  library(tidyverse)
   library(digest)
-  library(here)
+  library(lubridate)
 })
 
-# =============================================================================
-# Output locations (ensure folders exist)
-# =============================================================================
-dir.create("data",           recursive = TRUE, showWarnings = FALSE)
-dir.create("data_raw",       recursive = TRUE, showWarnings = FALSE)
-dir.create("data_processed", recursive = TRUE, showWarnings = FALSE)
-dir.create("docs",           recursive = TRUE, showWarnings = FALSE)
-dir.create("output",         recursive = TRUE, showWarnings = FALSE)
+# ---- Directories -------------------------------------------------------------
+dir.create("data",           showWarnings = FALSE, recursive = TRUE)
+dir.create("data_processed", showWarnings = FALSE, recursive = TRUE)
+dir.create("docs",           showWarnings = FALSE, recursive = TRUE)
+dir.create("output",         showWarnings = FALSE, recursive = TRUE)
 
-out_anon_basic   <- here("data",           "survey_responses_anonymized_basic.csv")
-out_class_prelim <- here("data_processed", "survey_responses_anonymized_preliminary.csv")
-out_class_final  <- here("data_processed", "survey_responses_anonymized_classified.csv")
-out_dict         <- here("data",           "data_dictionary.csv")
-out_template     <- here("docs",           "appendix_j_classification_template.csv")
-in_class_final   <- here("docs",           "appendix_j_classifications_complete.csv")
+# ---- User-configurable: RAW INPUT PATH --------------------------------------
+# Put your raw Qualtrics CSV under data_raw/ (unchanged file name is fine).
+raw_input <- list.files("data_raw", pattern = "\\.csv$", full.names = TRUE) %>%
+  # If multiple, pick the latest modified file.
+  { if (length(.) == 0) stop("No CSV found under data_raw/") else . } %>%
+  { .[which.max(file.mtime(.))] }
 
-# =============================================================================
-# Config: path to raw Qualtrics export (CSV)
-#   - Keep the exact filename; update here if the export name changes.
-# =============================================================================
-raw_input <- here(
-  "data_raw",
-  "(Strategic Research) Accelerating climate finance_ An analysis of barriers and solutions_August 21, 2024_18.54.csv"
-)
+cat("Raw input: ", raw_input, "\n\n", sep = "")
 
-cat("Raw input:", raw_input, "\n\n")
+# ---- Helpers ----------------------------------------------------------------
 
-# =============================================================================
-# Helpers
-# =============================================================================
+has_col <- function(df, nm) nm %in% names(df)
 
-# -- Robust Qualtrics reader ---------------------------------------------------
-# Skips the 2-line Qualtrics preamble (question text + ImportId JSON).
-# If the preamble is not standard, auto-detects & drops it.
-read_qualtrics_csv <- function(path) {
-  # First try the common case: skip the first 2 rows
-  df <- suppressMessages(readr::read_csv(path, col_types = cols(.default = "c"), skip = 2))
-
-  # Heuristic: if first row still looks like preamble, re-read and drop first 2
-  looks_like_preamble <- function(x) {
-    if (length(x) == 0) return(FALSE)
-    head_vals <- na.omit(x)[seq_len(min(3, length(na.omit(x))))]
-    any(grepl('^\\{"ImportId":', head_vals, useBytes = TRUE)) ||
-      any(c("Start Date", "Recorded Date") %in% head_vals)
-  }
-  if (nrow(df) > 0 && looks_like_preamble(df$StartDate)) {
-    df0 <- suppressMessages(readr::read_csv(path, col_types = cols(.default = "c"), skip = 0))
-    if (nrow(df0) >= 3) df <- df0[-c(1, 2), , drop = FALSE]
-  }
-
-  # Make names syntactically simpler but keep key IDs readable
-  names(df) <- gsub("\\s+", "", names(df))  # "Start Date" -> "StartDate"
-  df
+# Find first present column among a set
+first_present_col <- function(df, candidates) {
+  cands <- candidates[candidates %in% names(df)]
+  if (length(cands)) cands[1] else NA_character_
 }
 
-# -- Bullet-proof month extractor: returns "YYYY-MM" or NA; never errors -------
+# Safe, tolerant year-month coercion for various Qualtrics/Excel formats.
+# Returns character "YYYY-MM" or NA.
 safe_month <- function(x) {
-  if (is.null(x)) return(NA_character_)
-  v <- trimws(as.character(x))
-  v[v == ""] <- NA_character_
+  if (is.null(x)) return(rep(NA_character_, 0))
+  x <- trimws(as.character(x))
+  x[x == ""] <- NA_character_
+  if (all(is.na(x))) return(x)
 
+  # Try several common patterns *without* erroring:
   try_formats <- c(
-    "%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d",
-    "%m/%d/%Y %H:%M:%S", "%m/%d/%Y %H:%M", "%m/%d/%Y",
-    "%d/%m/%Y %H:%M:%S", "%d/%m/%Y %H:%M", "%d/%m/%Y"
+    # Full timestamp (US style)
+    "m/d/Y H:M:S", "m/d/Y H:M", "m/d/Y",
+    # ISO-ish
+    "Y-m-d H:M:S", "Y-m-d",
+    # D/M/Y (EU)
+    "d/m/Y H:M:S", "d/m/Y",
+    # Wordy dates (rare)
+    "Y-b-d", "b d, Y", "B d, Y"
   )
 
-  parse_one <- function(s) {
-    if (is.na(s)) return(NA_character_)
-    for (fmt in try_formats) {
-      dt <- try(as.POSIXct(s, format = fmt, tz = "UTC"), silent = TRUE)
-      if (!inherits(dt, "try-error") && !is.na(dt)) return(format(dt, "%Y-%m"))
-    }
-    # last-resort: lubridate if installed
-    if (requireNamespace("lubridate", quietly = TRUE)) {
-      dt <- try(lubridate::parse_date_time(
-        s,
-        orders = c("Ymd HMS","Ymd HM","Ymd","mdY HMS","mdY HM","mdY","dmy HMS","dmy HM","dmy"),
-        tz = "UTC", quiet = TRUE
-      ), silent = TRUE)
-      if (!inherits(dt, "try-error") && !is.na(dt)) return(format(dt, "%Y-%m"))
-    }
-    NA_character_
-  }
-
-  vapply(v, parse_one, character(1))
+  # lubridate::parse_date_time is very tolerant.
+  dt <- suppressWarnings(parse_date_time(x, orders = try_formats, tz = "UTC"))
+  out <- ifelse(is.na(dt), NA_character_, format(dt, "%Y-%m"))
+  out
 }
 
-# -- Deterministic hash helper -------------------------------------------------
-hash_id <- function(x, prefix = "ID") {
-  if (is.null(x)) return(NA_character_)
-  sapply(x, function(i) {
-    if (is.na(i) || i == "") return(NA_character_)
-    paste0(prefix, "_", substr(digest(as.character(i), algo = "sha256"), 1, 10))
-  }, USE.NAMES = FALSE)
+# Deterministic short hash for IDs
+create_hash_id <- function(x, prefix = "ID") {
+  vapply(
+    x,
+    function(i) {
+      if (is.na(i) || i == "") return(NA_character_)
+      paste0(prefix, "_", substr(digest(as.character(i), algo = "sha256"), 1, 8))
+    },
+    character(1)
+  )
 }
 
-# =============================================================================
-#  PART 1: BASIC ANONYMIZATION
-# =============================================================================
+# ---- Load raw as character (prevents readr guessing issues) -----------------
+raw_data <- readr::read_csv(
+  raw_input,
+  col_types = readr::cols(.default = readr::col_character())
+)
 
 cat("=== PART 1: BASIC ANONYMIZATION ===\n")
 cat("Loading raw survey data...\n")
-
-if (!file.exists(raw_input)) {
-  stop("Raw CSV not found at: ", raw_input, "\nPlease verify the filename in this script.")
-}
-
-raw_data <- read_qualtrics_csv(raw_input)
-
 cat("Loaded", nrow(raw_data), "rows and", ncol(raw_data), "columns\n")
 
-cat("Anonymizing data (removing PII)...\n")
+# ---- Guarantee respondent_id exists -----------------------------------------
+# Qualtrics exports vary: ResponseId, _recordId, Response ID, etc.
+id_candidates <- c("ResponseId", "_recordId", "Response ID", "Response_Id", "Response Id")
+id_src <- first_present_col(raw_data, id_candidates)
 
-# Columns that can contain PII (remove if present)
-pii_columns <- c(
-  "IPAddress", "RecipientLastName", "RecipientFirstName", "RecipientEmail",
-  "ExternalReference", "LocationLatitude", "LocationLongitude",
-  "FULL_NAME", "GENDER", "ORGANIZATION_NAME",
-  "hq_address_line_1","hq_address_line_2","hq_email","hq_phone",
-  "primary_contact_email","primary_contact_phone","website",
-  "lp_name","PRIMARY_POSITION","description"
-)
-
-# Create anonymized basic dataset
-df <- raw_data
-
-# Safe month fields
-if (!"StartDate_month" %in% names(df) && "StartDate" %in% names(df))   df$StartDate_month   <- safe_month(df$StartDate)
-if (!"EndDate_month"   %in% names(df) && "EndDate"   %in% names(df))   df$EndDate_month     <- safe_month(df$EndDate)
-if (!"RecordedDate_month" %in% names(df) && "RecordedDate" %in% names(df)) df$RecordedDate_month <- safe_month(df$RecordedDate)
-
-# Hash IDs (when source columns exist)
-if ("ResponseId" %in% names(df))     df$respondent_id   <- hash_id(df$ResponseId,   "RESP")
-if ("ORGANIZATION_ID" %in% names(df))df$organization_id <- hash_id(df$ORGANIZATION_ID, "ORG")
-if ("FIRM_ORGANIZATION_ID" %in% names(df))
-  df$firm_id <- hash_id(df$FIRM_ORGANIZATION_ID, "FIRM")
-
-# Region / geography: keep as is if Q2.2 exists (selected region)
-# If you also have hq_* fields at street-level, drop them to avoid leakage.
-geo_drop <- intersect(
-  c("hq_state_province","hq_city","hq_zip_code","hq_country"),
-  names(df)
-)
-if (length(geo_drop)) df <- select(df, -any_of(geo_drop))
-
-# Remove explicit PII + known direct IDs that we’ve re-hashed
-df <- df %>%
-  select(-any_of(c(
-    pii_columns,
-    "ResponseId", "ORGANIZATION_ID", "FIRM_ORGANIZATION_ID",
-    "FIRM_ORGANIZATION_ID_NUMBER", "pbid"
-  )))
-
-# Keep the raw date-time fields out (we’ve stored YYYY-MM)
-df <- df %>% select(-any_of(c("StartDate","EndDate","RecordedDate")))
-
-# Save the basic anonymized file
-write_csv(df, out_anon_basic)
-cat("Saved basic anonymized data ->", out_anon_basic, "\n")
-
-# For downstream steps
-anonymized_basic <- df
-
-# === PART 2: PREPARING FOR APPENDIX J CLASSIFICATIONS ===
-cat("\n=== PART 2: PREPARING FOR APPENDIX J CLASSIFICATIONS ===\n")
-
-# Helper: find first matching column name
-first_present <- function(nm, candidates_exact = character(), candidates_regex = character()) {
-  for (c in candidates_exact) if (c %in% nm) return(c)
-  for (rx in candidates_regex) {
-    hit <- grep(rx, nm, value = TRUE)
-    if (length(hit)) return(hit[1])
-  }
-  NULL
+if (is.na(id_src)) {
+  # No source ID present: generate a temporary index for hashing
+  raw_data[[".row_index_tmp"]] <- seq_len(nrow(raw_data))
+  id_src <- ".row_index_tmp"
 }
 
-nm <- names(anonymized_basic)
+raw_data[["respondent_id"]] <- create_hash_id(raw_data[[id_src]], "RESP")
 
-# Try multiple possibilities for role and other-text columns
-q_role <- first_present(
-  nm,
-  candidates_exact = c("Q2.1", "Q2_1", "QID174"),
-  candidates_regex = c("Which.*role.*SelectedChoice")
-)
-q_other <- first_present(
-  nm,
-  candidates_exact = c("Q2.1_12_TEXT", "Q2_1_12_TEXT"),
-  candidates_regex = c("Which.*role.*Other.*Text")
+# ---- Coarsen geography -------------------------------------------------------
+# Use Qualtrics Q2.2 where available, else try to build a region from hq_country.
+# We keep the final field as "hq_region".
+norm_names <- tolower(names(raw_data))
+
+# Try to find a direct region-like column (Q2.2 or similar)
+region_col <- first_present_col(
+  raw_data,
+  c("Q2.2", "Where is your organization headquartered? - Selected Choice", "hq_country", "HQ_COUNTRY", "country", "Country")
 )
 
-if (is.null(q_role)) {
+hq_region <- rep(NA_character_, nrow(raw_data))
+if (!is.na(region_col)) {
+  # If the column already contains region categories like "Europe / North America", keep it
+  # otherwise do a country -> region mapping
+  v <- raw_data[[region_col]]
+
+  # Very light heuristic: if values already look like regions, just use them
+  looks_like_region <- function(z) {
+    any(grepl("\\b(asia|europe|north america|south america|australia|oceania|africa|gcc)\\b",
+              tolower(z %||% ""), ignore.case = TRUE))
+  }
+
+  if (looks_like_region(v)) {
+    hq_region <- v
+  } else {
+    # Country -> region mapping fallback
+    vc <- tolower(v %||% "")
+    hq_region[vc %in% c("united states","usa","us","canada","ca")] <- "North America"
+    hq_region[vc %in% c("united kingdom","uk","england","scotland","wales",
+                        "ireland","germany","de","france","fr","netherlands",
+                        "switzerland","sweden","denmark","norway","spain",
+                        "italy","belgium","austria","finland","greece","portugal")] <- "Europe"
+    hq_region[vc %in% c("china","cn","japan","jp","singapore","sg","india","in",
+                        "south korea","kr","hong kong","taiwan","id","thailand","vietnam","gcc")] <- "Asia"
+    hq_region[vc %in% c("brazil","argentina","chile","mexico","colombia","peru")] <- "Latin America"
+    hq_region[vc %in% c("australia","new zealand","oceania")] <- "Australia/Oceania"
+    hq_region[vc %in% c("south africa","nigeria","kenya","egypt","morocco")] <- "Africa"
+    hq_region[is.na(hq_region) & vc != ""] <- "Other"
+  }
+}
+
+# ---- Build date year-month fields (tolerant to naming) -----------------------
+start_col    <- first_present_col(raw_data, c("StartDate","Start Date","startDate","start date"))
+end_col      <- first_present_col(raw_data, c("EndDate","End Date","endDate","end date"))
+recorded_col <- first_present_col(raw_data, c("RecordedDate","Recorded Date","recordedDate","recorded date"))
+
+StartDate_month    <- if (!is.na(start_col))    safe_month(raw_data[[start_col]])    else NA_character_
+EndDate_month      <- if (!is.na(end_col))      safe_month(raw_data[[end_col]])      else NA_character_
+RecordedDate_month <- if (!is.na(recorded_col)) safe_month(raw_data[[recorded_col]]) else NA_character_
+
+# ---- Define columns to remove (PII + raw identifiers) -----------------------
+pii_columns <- c(
+  # network/identity/contacts
+  "IPAddress", "ipAddress", "RecipientLastName", "RecipientFirstName", "RecipientEmail",
+  "recipientLastName", "recipientFirstName", "recipientEmail",
+  "ExternalReference", "externalDataReference",
+  "LocationLatitude", "LocationLongitude", "locationLatitude", "locationLongitude",
+  "FULL_NAME", "GENDER", "ORGANIZATION_NAME",
+  "hq_address_line_1", "hq_address_line_2", "hq_email", "hq_phone", "primary_contact_email",
+  "primary_contact_phone", "website", "lp_name", "PRIMARY_POSITION", "description",
+  # raw IDs we do not keep
+  "ResponseId", "_recordId", "Response ID", "Response_Id", "Response Id",
+  "FIRM_ORGANIZATION_ID", "FIRM_ORGANIZATION_ID_NUMBER", "ORGANIZATION_ID",
+  "pbid"
+)
+
+# ---- Construct anonymized_basic ---------------------------------------------
+cat("Anonymizing data (removing PII)...\n")
+
+anonymized_basic <- raw_data %>%
+  mutate(
+    hq_region = hq_region,
+    StartDate_month = StartDate_month,
+    EndDate_month = EndDate_month,
+    RecordedDate_month = RecordedDate_month
+  ) %>%
+  # Drop raw date/time columns if present
+  select(-any_of(c(start_col, end_col, recorded_col))) %>%
+  # Drop PII and raw identifiers, but KEEP respondent_id
+  select(-any_of(setdiff(pii_columns, "respondent_id")))
+
+# ---- Save basic anonymized ---------------------------------------------------
+out_basic <- "data/survey_responses_anonymized_basic.csv"
+readr::write_csv(anonymized_basic, out_basic)
+cat("Saved basic anonymized data -> ", normalizePath(out_basic), "\n\n", sep = "")
+
+# =============================================================================
+# PART 2: PREPARE FOR APPENDIX J CLASSIFICATIONS
+# =============================================================================
+cat("=== PART 2: PREPARING FOR APPENDIX J CLASSIFICATIONS ===\n")
+
+# Try to find role columns in multiple shapes
+role_col  <- first_present_col(anonymized_basic, c("Q2.1",
+  "Which of the following best describes your role? (Please select the most appropriate option) - Selected Choice",
+  "role", "Role"))
+role_other <- first_present_col(anonymized_basic, c("Q2.1_12_TEXT",
+  "Which of the following best describes your role? (Please select the most appropriate option) - Other (please specify)  - Text",
+  "role_other", "Role_Other"))
+
+if (is.na(role_col)) {
   warning("Role column not found; classification template will be empty.")
 }
 
-responses_to_classify <- anonymized_basic %>%
-  mutate(
-    role_raw   = if (!is.null(q_role))   .data[[q_role]]   else NA_character_,
-    role_other = if (!is.null(q_other))  .data[[q_other]]  else NA_character_
-  ) %>%
-  select(any_of(c("respondent_id", "role_raw", "role_other"))) %>%
-  filter(!if_all(everything(), ~ is.na(.x) | .x == ""))
+# Build template only if we have respondent_id + at least one role field
+template <- anonymized_basic %>%
+  select(any_of(c("respondent_id", role_col, role_other))) %>%
+  rename(
+    role_raw   = !!rlang::sym(role_col)  %||% "role_raw",
+    role_other = !!rlang::sym(role_other) %||% "role_other"
+  )
 
-# Vectorised preliminary mapping
-classification_template <- responses_to_classify %>%
+if (!"respondent_id" %in% names(template)) {
+  # extreme edge-case fallback
+  template <- anonymized_basic %>%
+    mutate(respondent_id = respondent_id %||% row_number()) %>%
+    select(any_of(c("respondent_id", role_col, role_other))) %>%
+    rename(
+      role_raw   = !!rlang::sym(role_col)  %||% "role_raw",
+      role_other = !!rlang::sym(role_other) %||% "role_other"
+    )
+}
+
+# Provide a preliminary bucket to help manual coders
+prelim_map <- function(x) {
+  z <- tolower(x %||% "")
+  dplyr::case_when(
+    grepl("entrepreneur|founder|startup", z) ~ "Entrepreneur in Climate Technology",
+    grepl("venture capital", z) & !grepl("corporate", z) ~ "Venture Capital Firm",
+    grepl("corporate venture|cvc", z) ~ "Corporate Venture Arm",
+    grepl("private equity", z) ~ "Private Equity Firm",
+    grepl("family office", z) ~ "Family Office",
+    grepl("angel", z) ~ "Angel Investor",
+    grepl("limited partner|\\blp\\b", z) ~ "Limited Partner",
+    grepl("esg investor", z) ~ "ESG Investor",
+    grepl("government|ministry|department|agency|dfi|development finance|multilateral|bilateral", z) ~ "Government Funding Agency",
+    grepl("philanthropic|foundation|donor|grantmaker", z) ~ "Philanthropic Organization",
+    grepl("nonprofit|non-profit|ngo|charity|association|advocacy|civil society", z) ~ "Nonprofit Organization",
+    grepl("academic|university|research", z) ~ "Academic or Research Institution",
+    z == "" ~ NA_character_,
+    TRUE ~ "Other"
+  )
+}
+
+classification_template <- template %>%
   mutate(
-    preliminary_category = case_when(
-      str_detect(tolower(role_raw), "venture capital") & !str_detect(tolower(role_raw), "corporate") ~ "Venture Capital Firm",
-      str_detect(tolower(role_raw), "corporate venture")     ~ "Corporate Venture Arm",
-      str_detect(tolower(role_raw), "\\bangel\\b")           ~ "Angel Investor",
-      str_detect(tolower(role_raw), "private equity")        ~ "Private Equity Firm",
-      str_detect(tolower(role_raw), "family office")         ~ "Family Office",
-      str_detect(tolower(role_raw), "limited partner|\\blp\\b") ~ "Limited Partner",
-      str_detect(tolower(role_raw), "philanthrop")           ~ "Philanthropic Organization",
-      str_detect(tolower(role_raw), "non.?profit|ngo|charit") ~ "Nonprofit Organization",
-      str_detect(tolower(role_raw), "academic|research|universit") ~ "Academic or Research Institution",
-      str_detect(tolower(role_raw), "government|ministry|department|agency|\\bdfi\\b") ~ "Government Funding Agency",
-      str_detect(tolower(role_raw), "esg investor")          ~ "ESG Investor",
-      str_detect(tolower(role_raw), "entrepreneur|founder|startup") ~ "Entrepreneur in Climate Technology",
-      !is.na(role_other) & role_other != ""                  ~ "NEEDS_CLASSIFICATION",
-      TRUE                                                   ~ "Other"
-    ),
+    preliminary_category = prelim_map(role_raw %||% role_other),
     final_category_appendix_j = NA_character_
-  ) %>%
-  select(respondent_id, role_raw, role_other,
-         preliminary_category, final_category_appendix_j)
+  )
 
-write_csv(classification_template, out_template)
-cat("Classification template saved -> ", out_template, "\n")
+tmpl_out <- "docs/appendix_j_classification_template.csv"
+readr::write_csv(classification_template, tmpl_out)
+cat("Classification template -> ", normalizePath(tmpl_out), "\n", sep = "")
 
-# =============================================================================
-#  PART 3: BUILD CLASSIFIED OUTPUT (preliminary or final if provided)
-# =============================================================================
+# ---- Merge final classifications if present ---------------------------------
+final_class_file <- "docs/appendix_j_classifications_complete.csv"
 
-cat("\n=== PART 3: BUILD CLASSIFIED DATA ===\n")
+if (file.exists(final_class_file)) {
+  cat("Found completed classifications. Merging...\n")
+  final_class <- readr::read_csv(final_class_file, show_col_types = FALSE)
 
-if (file.exists(in_class_final)) {
-  cat("Found completed classifications -> merging.\n")
-  final_map <- suppressMessages(readr::read_csv(in_class_final, col_types = cols(.default = "c")))
-  needed <- c("respondent_id", "final_category_appendix_j")
-  missing_cols <- setdiff(needed, names(final_map))
-  if (length(missing_cols)) {
-    stop("Classification file is missing required columns: ", paste(missing_cols, collapse = ", "))
+  # Expect at least respondent_id + final_category_appendix_j
+  if (!all(c("respondent_id","final_category_appendix_j") %in% names(final_class))) {
+    stop("`appendix_j_classifications_complete.csv` must contain respondent_id and final_category_appendix_j.")
   }
 
-  out_df <- anonymized_basic %>%
+  anonymized_classified <- anonymized_basic %>%
     left_join(
-      final_map %>% select(respondent_id, final_category_appendix_j),
+      final_class %>% select(respondent_id, final_category_appendix_j),
       by = "respondent_id"
-    ) %>%
-    left_join(
-      classification_template %>% select(respondent_id, preliminary_category),
-      by = "respondent_id"
-    ) %>%
-    mutate(stakeholder_category = coalesce(final_category_appendix_j, preliminary_category))
+    )
 
-  write_csv(out_df, out_class_final)
-  cat("Classified data saved ->", out_class_final, "\n")
-
+  out_class <- "data/survey_responses_anonymized_classified.csv"
+  readr::write_csv(anonymized_classified, out_class)
+  cat("Classified data -> ", normalizePath(out_class), "\n", sep = "")
 } else {
-  cat("Completed classification file not found.\n")
-  cat("Creating PRELIMINARY classified data (using preliminary_category only)...\n")
-
-  out_df <- anonymized_basic %>%
+  cat("No completed classifications found. Writing preliminary version...\n")
+  prelim <- anonymized_basic %>%
     left_join(
       classification_template %>% select(respondent_id, preliminary_category),
       by = "respondent_id"
     ) %>%
     mutate(stakeholder_category = preliminary_category)
 
-  write_csv(out_df, out_class_prelim)
-  cat("Preliminary classified data saved ->", out_class_prelim, "\n")
+  out_prelim <- "data/survey_responses_anonymized_preliminary.csv"
+  readr::write_csv(prelim, out_prelim)
+  cat("Preliminary classified data -> ", normalizePath(out_prelim), "\n", sep = "")
 }
 
 # =============================================================================
-#  SUMMARY + DATA DICTIONARY
+# PART 3: SUMMARY + DATA DICTIONARY
 # =============================================================================
-
 cat("\n=== ANONYMIZATION SUMMARY ===\n")
-cat("Original columns:", ncol(raw_data), "\n")
+cat("Original columns:  ", ncol(raw_data), "\n")
 cat("Anonymized columns:", ncol(anonymized_basic), "\n")
-cat("Columns removed:", ncol(raw_data) - ncol(anonymized_basic), "\n")
-cat("Rows preserved:", nrow(anonymized_basic), "\n")
+cat("Columns removed:   ", ncol(raw_data) - ncol(anonymized_basic), "\n")
+cat("Rows preserved:    ", nrow(anonymized_basic), "\n")
 
 data_dict <- tibble(
   variable_name   = names(anonymized_basic),
   type            = vapply(anonymized_basic, function(x) class(x)[1], character(1)),
-  n_missing       = vapply(anonymized_basic, function(x) sum(is.na(x)), integer(1))
-) %>%
-  mutate(n_non_missing   = nrow(anonymized_basic) - n_missing,
-         completeness_pct = round(100 * n_non_missing / nrow(anonymized_basic), 1))
+  n_missing       = vapply(anonymized_basic, function(x) sum(is.na(x)), integer(1)),
+  n_non_missing   = nrow(anonymized_basic) - n_missing,
+  completeness_pct = round((n_non_missing / nrow(anonymized_basic)) * 100, 1)
+)
 
-write_csv(data_dict, out_dict)
-cat("Data dictionary saved ->", out_dict, "\n")
+dict_out <- "data/data_dictionary.csv"
+readr::write_csv(data_dict, dict_out)
+cat("Data dictionary -> ", normalizePath(dict_out), "\n", sep = "")
 
 cat("\n=== PROCESS COMPLETE ===\n")
 cat("Next steps:\n")
-cat("1) Open and complete:", out_template, "\n")
-cat("2) Save completed file as:", in_class_final, "\n")
-cat("3) Re-run this script to produce:", out_class_final, "\n\n")
+cat("1) Fill in 'docs/appendix_j_classifications_complete.csv' (based on the template).\n")
+cat("2) Re-run this script to produce a fully classified dataset in data/.\n")
