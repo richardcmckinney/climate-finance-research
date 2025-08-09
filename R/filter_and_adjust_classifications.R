@@ -1,7 +1,11 @@
+#!/usr/bin/env Rscript
+# Safety for Rscript/S4 compatibility (MUST BE FIRST)
+if (!"methods" %in% loadedNamespaces()) library(methods)
+if (!exists(".local", inherits = TRUE)) .local <- function(...) NULL
+
 # filter_and_adjust_classifications.R
 # Purpose: Report deficits vs Appendix J and propose a donor pool (audit utility)
 
-if (!"methods" %in% loadedNamespaces()) library(methods)
 suppressPackageStartupMessages(library(tidyverse))
 
 dir.create("output", recursive = TRUE, showWarnings = FALSE)

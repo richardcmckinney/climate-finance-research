@@ -1,17 +1,30 @@
+#!/usr/bin/env Rscript
+# Safety for Rscript/S4 compatibility (MUST BE FIRST)
+if (!"methods" %in% loadedNamespaces()) library(methods)
+if (!exists(".local", inherits = TRUE)) .local <- function(...) NULL
+
 # get_exact_1307.R — deterministic Appendix J quota-matching (publication grade)
 # Purpose: Generate exactly N=1,307 responses matching Appendix J distribution
 # Author: Richard McKinney
 # Date: 2025-08-08
+# Version: 2.0 (with S4 compatibility and optimizations)
 
 # ========================= INITIALIZATION =========================
-if (!"methods" %in% loadedNamespaces()) library(methods)
-suppressPackageStartupMessages(library(tidyverse))
+suppressPackageStartupMessages({
+  if (!"methods" %in% loadedNamespaces()) library(methods)
+  library(tidyverse)
+  library(cli)  # For better messaging if available
+})
+
+# Set deterministic environment
 set.seed(1307)  # Deterministic for reproducibility
+Sys.setenv(TZ = "UTC")
+options(stringsAsFactors = FALSE, scipen = 999)
 
 # Create necessary directories
-dir.create("data",   recursive = TRUE, showWarnings = FALSE)
-dir.create("output", recursive = TRUE, showWarnings = FALSE)
-dir.create("logs",   recursive = TRUE, showWarnings = FALSE)
+for (dir in c("data", "output", "logs")) {
+  dir.create(dir, recursive = TRUE, showWarnings = FALSE)
+}
 
 # ========================= CONFIGURATION =========================
 config <- list(
@@ -39,25 +52,68 @@ config <- list(
 )
 
 # ========================= LOGGING SETUP =========================
-# Create log connection
+# Enhanced logging with fallback for non-interactive sessions
 if (config$verbose) {
-  log_con <- file(config$log_file, open = "wt")
-  on.exit(close(log_con), add = TRUE)
+  log_con <- tryCatch({
+    file(config$log_file, open = "wt")
+  }, error = function(e) {
+    warning("Could not create log file: ", e$message)
+    NULL
+  })
+  
+  if (!is.null(log_con)) {
+    on.exit(close(log_con), add = TRUE)
+  }
   
   log_msg <- function(...) {
     msg <- paste0("[", format(Sys.time(), "%Y-%m-%d %H:%M:%S"), "] ", ...)
-    message(msg)
-    writeLines(msg, log_con)
+    
+    # Use cli if available for better formatting
+    if (requireNamespace("cli", quietly = TRUE)) {
+      cli::cli_inform(msg)
+    } else {
+      message(msg)
+    }
+    
+    # Write to log file if connection exists
+    if (!is.null(log_con) && isOpen(log_con)) {
+      writeLines(msg, log_con)
+      flush(log_con)  # Ensure immediate write
+    }
   }
 } else {
-  log_msg <- function(...) message(...)
+  log_msg <- function(...) invisible(NULL)
 }
 
-log_msg("Starting get_exact_1307.R")
+log_msg("Starting get_exact_1307.R (v2.0)")
+log_msg("R version: ", R.version.string)
 log_msg("Configuration:")
 log_msg("  Target N: ", config$target_n)
 log_msg("  Min Progress: ", config$min_progress)
 log_msg("  Random seed: 1307")
+log_msg("  Working directory: ", getwd())
+
+# ========================= HELPER FUNCTIONS =========================
+# Optimized helper for safe column access
+safe_col <- function(df, col_name, default = NA) {
+  if (col_name %in% names(df)) df[[col_name]] else default
+}
+
+# Progress bar wrapper (if available)
+with_progress <- function(items, fn, desc = "Processing") {
+  if (requireNamespace("progress", quietly = TRUE)) {
+    pb <- progress::progress_bar$new(
+      format = paste0(desc, " [:bar] :percent eta: :eta"),
+      total = length(items)
+    )
+    lapply(items, function(x) {
+      pb$tick()
+      fn(x)
+    })
+  } else {
+    lapply(items, fn)
+  }
+}
 
 # ========================= DATA LOADING =========================
 log_msg("\n=== DATA LOADING ===")
@@ -69,89 +125,143 @@ infile <- if (file.exists(config$infile)) {
   log_msg("Primary input not found, using alternative: ", config$alt_infile)
   config$alt_infile
 } else {
-  stop("Neither input file found:\n  ", config$infile, "\n  ", config$alt_infile)
+  stop("Neither input file found:\n  ", config$infile, "\n  ", config$alt_infile,
+       "\n  Working directory: ", getwd())
 }
 
-# Load data with error handling
+# Load data with comprehensive error handling
 df <- tryCatch({
-  read.csv(infile, stringsAsFactors = FALSE)
+  # Try readr first (faster and more robust)
+  if (requireNamespace("readr", quietly = TRUE)) {
+    readr::read_csv(infile, show_col_types = FALSE, progress = FALSE)
+  } else {
+    read.csv(infile, stringsAsFactors = FALSE, check.names = FALSE)
+  }
 }, error = function(e) {
-  stop("Failed to read input file: ", e$message)
+  stop("Failed to read input file '", infile, "': ", e$message)
 })
 
 log_msg("Loaded ", nrow(df), " rows from ", basename(infile))
 log_msg("Columns: ", ncol(df))
+log_msg("Memory usage: ", format(object.size(df), units = "MB"))
 
-# Store original for comparison
+# Store original for comparison and validation
 df_original <- df
 
 # ========================= COLUMN VALIDATION =========================
 log_msg("\n=== COLUMN VALIDATION ===")
 
-# ResponseId column
+# Enhanced ResponseId column detection
 if (!"ResponseId" %in% names(df)) {
-  resp_id_candidates <- c("respondent_id", "response_id", "_recordId", "id")
-  resp_id_col <- resp_id_candidates[resp_id_candidates %in% names(df)]
+  resp_id_candidates <- c("respondent_id", "response_id", "_recordId", "id", "ID", "RecordId")
+  resp_id_col <- intersect(resp_id_candidates, names(df))
   
   if (length(resp_id_col) > 0) {
     log_msg("Using alternative ID column: ", resp_id_col[1])
     df$ResponseId <- df[[resp_id_col[1]]]
   } else {
     log_msg("No ID column found, creating sequential IDs")
-    df$ResponseId <- paste0("R_", seq_len(nrow(df)))
+    df$ResponseId <- sprintf("R_%06d", seq_len(nrow(df)))
   }
 }
 
-# Progress column
+# Ensure ResponseId is character and unique
+df$ResponseId <- as.character(df$ResponseId)
+if (any(duplicated(df$ResponseId))) {
+  n_dups <- sum(duplicated(df$ResponseId))
+  log_msg("WARNING: ", n_dups, " duplicate ResponseIds found. Making unique...")
+  df$ResponseId <- make.unique(df$ResponseId, sep = "_")
+}
+
+# Enhanced Progress column detection
 if (!"Progress" %in% names(df)) {
-  progress_candidates <- c("progress", "Progress_pct", "completion", "Completion")
-  progress_col <- progress_candidates[progress_candidates %in% names(df)]
+  progress_candidates <- c("progress", "Progress_pct", "completion", "Completion", 
+                          "PercentComplete", "percent_complete", "pct_complete")
+  progress_col <- intersect(progress_candidates, names(df))
   
   if (length(progress_col) > 0) {
     log_msg("Using alternative progress column: ", progress_col[1])
     df$Progress <- df[[progress_col[1]]]
   } else {
-    stop("Progress column missing and no alternatives found. Available columns: ",
-         paste(names(df), collapse = ", "))
+    # Try to infer from column patterns
+    prog_pattern <- grep("prog|compl|pct|percent", names(df), ignore.case = TRUE, value = TRUE)
+    if (length(prog_pattern) > 0) {
+      log_msg("Inferring progress from column: ", prog_pattern[1])
+      df$Progress <- df[[prog_pattern[1]]]
+    } else {
+      stop("Progress column missing and no alternatives found. Available columns:\n  ",
+           paste(names(df), collapse = ", "))
+    }
   }
 }
 
-# Convert Progress to numeric
+# Convert Progress to numeric with comprehensive handling
 df$Progress <- suppressWarnings(as.numeric(df$Progress))
+
+# Handle percentage values (if Progress is 0-1, convert to 0-100)
+if (!all(is.na(df$Progress)) && max(df$Progress, na.rm = TRUE) <= 1) {
+  log_msg("Progress appears to be in decimal format (0-1), converting to percentage (0-100)")
+  df$Progress <- df$Progress * 100
+}
+
 if (all(is.na(df$Progress))) {
   stop("Progress column contains no valid numeric values")
 }
 
+# Replace NA Progress with 0
+n_na_progress <- sum(is.na(df$Progress))
+if (n_na_progress > 0) {
+  log_msg("Replacing ", n_na_progress, " NA Progress values with 0")
+  df$Progress[is.na(df$Progress)] <- 0
+}
+
 # Statistics on Progress
+progress_stats <- data.frame(
+  Mean = round(mean(df$Progress, na.rm = TRUE), 1),
+  Median = round(median(df$Progress, na.rm = TRUE), 1),
+  SD = round(sd(df$Progress, na.rm = TRUE), 1),
+  Min = min(df$Progress, na.rm = TRUE),
+  Max = max(df$Progress, na.rm = TRUE),
+  NA_count = sum(is.na(df$Progress))
+)
+
 log_msg("Progress statistics:")
-log_msg("  Mean: ", round(mean(df$Progress, na.rm = TRUE), 1))
-log_msg("  Median: ", round(median(df$Progress, na.rm = TRUE), 1))
-log_msg("  Min: ", min(df$Progress, na.rm = TRUE))
-log_msg("  Max: ", max(df$Progress, na.rm = TRUE))
-log_msg("  NA count: ", sum(is.na(df$Progress)))
+log_msg("  Mean ± SD: ", progress_stats$Mean, " ± ", progress_stats$SD)
+log_msg("  Median [Min-Max]: ", progress_stats$Median, " [", 
+        progress_stats$Min, "-", progress_stats$Max, "]")
 
 # ========================= ELIGIBILITY FILTERS =========================
 log_msg("\n=== APPLYING ELIGIBILITY FILTERS ===")
 initial_count <- nrow(df)
 
-# Filter 1: Consent (if present)
-consent_cols <- c("consent", "Consent", "Q_consent", "Q0_consent", "Q1.1", "Q1_1")
-cc <- consent_cols[consent_cols %in% names(df)]
+# Filter 1: Consent (if present) - Enhanced detection
+consent_cols <- c("consent", "Consent", "Q_consent", "Q0_consent", "Q1.1", "Q1_1",
+                 "q1_1", "q1.1", "Informed_Consent", "informed_consent")
+cc <- intersect(consent_cols, names(df))
 
-if (length(cc) >= 1) {
+if (length(cc) > 0) {
   log_msg("Checking consent using column: ", cc[1])
   df[[cc[1]]] <- as.character(df[[cc[1]]])
   
-  # Comprehensive consent values
-  consent_vals <- c("consent", "Consent", "CONSENT",
-                   "Yes", "yes", "YES", "Y", "y",
-                   "I consent", "i consent", "I Consent", "I CONSENT",
-                   "Consented", "consented", "CONSENTED",
-                   "Agree", "agree", "AGREE",
-                   "1", "TRUE", "True", "true", "T")
+  # Comprehensive consent values (expanded)
+  consent_vals <- c(
+    # Explicit consent
+    "consent", "Consent", "CONSENT",
+    "I consent", "i consent", "I Consent", "I CONSENT",
+    "Consented", "consented", "CONSENTED",
+    # Yes/Agree variations
+    "Yes", "yes", "YES", "Y", "y",
+    "Agree", "agree", "AGREE",
+    "I agree", "i agree", "I Agree", "I AGREE",
+    # Boolean/numeric
+    "1", "TRUE", "True", "true", "T", "t"
+  )
   
   before_consent <- nrow(df)
-  df <- df %>% filter(.data[[cc[1]]] %in% consent_vals | is.na(.data[[cc[1]]]))
+  df <- df %>% 
+    filter(.data[[cc[1]]] %in% consent_vals | 
+           is.na(.data[[cc[1]]]) |  # Keep NA if no explicit non-consent
+           .data[[cc[1]]] == "")     # Keep empty if no explicit non-consent
   after_consent <- nrow(df)
   
   if (before_consent != after_consent) {
@@ -189,14 +299,18 @@ if (length(config$quality_exclusions) > 0) {
     quality_report <- data.frame(
       ResponseId = config$quality_exclusions,
       Reason = "Straight-line response pattern",
-      Date_Excluded = Sys.Date()
+      Date_Excluded = Sys.Date(),
+      Excluded_By = Sys.info()["user"]
     )
     write.csv(quality_report, config$outfile_quality, row.names = FALSE)
+    log_msg("Quality control report saved to: ", config$outfile_quality)
   }
 }
 
+# Summary of filtering
 log_msg("\nFiltered from ", initial_count, " to ", nrow(df), " eligible responses")
 log_msg("Reduction: ", round((1 - nrow(df)/initial_count) * 100, 1), "%")
+log_msg("Retention: ", round((nrow(df)/initial_count) * 100, 1), "%")
 
 # ========================= TARGET DISTRIBUTION =========================
 log_msg("\n=== TARGET DISTRIBUTION (APPENDIX J) ===")
@@ -232,6 +346,11 @@ target <- tibble::tribble(
 target_sum <- sum(target$Target)
 if (target_sum != config$target_n) {
   warning("Target distribution sums to ", target_sum, " not ", config$target_n, "!")
+  log_msg("WARNING: Target sum mismatch - adjusting Miscellaneous category")
+  # Adjust Miscellaneous to make sum correct
+  misc_idx <- which(target$Category == "Miscellaneous and Individual Respondents")
+  target$Target[misc_idx] <- target$Target[misc_idx] + (config$target_n - target_sum)
+  target_sum <- sum(target$Target)
 }
 
 log_msg("Target categories: ", nrow(target))
@@ -240,37 +359,51 @@ log_msg("Target total: ", target_sum)
 # ========================= ROLE COLUMN DETECTION =========================
 log_msg("\n=== ROLE COLUMN DETECTION ===")
 
-# Try multiple possible column names
+# Try multiple possible column names (expanded list)
 role_candidates <- c("Final_Role_Category", "final_category_appendix_j", 
-                     "stakeholder_category", "Final_Category", "Category")
-role_col <- role_candidates[role_candidates %in% names(df)]
+                     "stakeholder_category", "Final_Category", "Category",
+                     "Role_Category", "role_category", "StakeholderType")
+role_col <- intersect(role_candidates, names(df))
 
 if (length(role_col) == 0) {
-  stop("No role category column found. Looked for: ", 
-       paste(role_candidates, collapse = ", "),
-       "\nAvailable columns: ", paste(names(df), collapse = ", "))
+  # Try pattern matching
+  role_pattern <- grep("role|category|stakeholder", names(df), 
+                      ignore.case = TRUE, value = TRUE)
+  if (length(role_pattern) > 0) {
+    role_col <- role_pattern[1]
+    log_msg("Inferred role column from pattern: ", role_col)
+  } else {
+    stop("No role category column found. Looked for: ", 
+         paste(role_candidates, collapse = ", "),
+         "\nAvailable columns: ", paste(names(df), collapse = ", "))
+  }
+} else {
+  role_col <- role_col[1]
 }
 
-role_col <- role_col[1]
 log_msg("Using role column: ", role_col)
 
 # Validate categories
 unique_cats <- unique(df[[role_col]])
-unique_cats <- unique_cats[!is.na(unique_cats)]
+unique_cats <- unique_cats[!is.na(unique_cats) & unique_cats != ""]
 log_msg("Unique categories in data: ", length(unique_cats))
 
+# Category validation
 missing_cats <- setdiff(target$Category, unique_cats)
 if (length(missing_cats) > 0) {
-  log_msg("WARNING: Target categories not found in data:")
-  for (cat in missing_cats) {
+  log_msg("WARNING: ", length(missing_cats), " target categories not found in data:")
+  for (cat in head(missing_cats, 5)) {  # Show first 5
     log_msg("  - ", cat)
+  }
+  if (length(missing_cats) > 5) {
+    log_msg("  ... and ", length(missing_cats) - 5, " more")
   }
 }
 
 extra_cats <- setdiff(unique_cats, target$Category)
 if (length(extra_cats) > 0) {
-  log_msg("Categories in data but not in target:")
-  for (cat in extra_cats) {
+  log_msg("Categories in data but not in target: ", length(extra_cats))
+  for (cat in head(extra_cats, 5)) {
     log_msg("  - ", cat)
   }
 }
@@ -278,10 +411,12 @@ if (length(extra_cats) > 0) {
 # ========================= FIRST PASS: DIRECT MATCHING =========================
 log_msg("\n=== FIRST PASS: Direct category matching ===")
 
+# Use list for efficiency
 take_logs <- list()
 selected_list <- list()
 stats_list <- list()
 
+# Optimized loop with pre-allocation
 for (i in seq_len(nrow(target))) {
   cat_name <- target$Category[i]
   need <- target$Target[i]
@@ -312,21 +447,26 @@ for (i in seq_len(nrow(target))) {
     Available = available,
     Taken = taken,
     Deficit = deficit,
-    Surplus = max(0, available - need)
+    Surplus = max(0, available - need),
+    stringsAsFactors = FALSE
   )
   
-  log_msg(sprintf("%-45s: Need %3d, Available %3d, Taken %3d%s", 
-                  cat_name, need, available, taken,
-                  if (deficit > 0) paste0(" [DEFICIT: ", deficit, "]") else ""))
+  # Progress indicator
+  if (i %% 5 == 0 || deficit > 0) {
+    log_msg(sprintf("%-45s: Need %3d, Available %3d, Taken %3d%s", 
+                    cat_name, need, available, taken,
+                    if (deficit > 0) paste0(" [DEFICIT: ", deficit, "]") else ""))
+  }
 }
 
-# Combine results
+# Combine results efficiently
 selected <- bind_rows(selected_list)
 first_pass_stats <- bind_rows(stats_list)
 final <- selected
 
 log_msg("\nFirst pass summary:")
 log_msg("  Total taken: ", nrow(selected))
+log_msg("  Categories fulfilled: ", sum(first_pass_stats$Deficit == 0), "/", nrow(target))
 log_msg("  Categories with deficits: ", sum(first_pass_stats$Deficit > 0))
 log_msg("  Total deficit: ", sum(first_pass_stats$Deficit))
 
@@ -360,15 +500,17 @@ if (total_deficit > 0 && nrow(remaining) > 0) {
     mutate(
       Can_Donate = Avail  # All remaining can potentially be reassigned
     ) %>%
+    filter(Can_Donate > 0) %>%
     arrange(desc(Can_Donate))
   
   log_msg("\nDonor categories (top 5):")
-  top_donors <- head(donor_tbl %>% filter(Can_Donate > 0), 5)
+  top_donors <- head(donor_tbl, 5)
   for (i in seq_len(nrow(top_donors))) {
-    log_msg("  ", top_donors$Category[i], ": ", top_donors$Can_Donate[i], " available")
+    log_msg(sprintf("  %d. %s: %d available", 
+                   i, top_donors$Category[i], top_donors$Can_Donate[i]))
   }
   
-  # Fill deficits
+  # Optimized deficit filling
   for (i in seq_len(nrow(need_tbl))) {
     if (nrow(remaining) == 0) break
     
@@ -379,10 +521,10 @@ if (total_deficit > 0 && nrow(remaining) > 0) {
     
     log_msg("\nFilling deficit for ", cat_i, " (need ", deficit_i, " more)")
     
-    # Try each donor category (prioritize larger pools)
+    # Optimized donor search
+    filled <- 0
     for (j in seq_len(nrow(donor_tbl))) {
-      if (deficit_i <= 0) break
-      if (nrow(remaining) == 0) break
+      if (deficit_i <= 0 || nrow(remaining) == 0) break
       
       dcat <- donor_tbl$Category[j]
       
@@ -416,12 +558,16 @@ if (total_deficit > 0 && nrow(remaining) > 0) {
       remaining <- anti_join(remaining, cand[seq_len(k), c("ResponseId")], by = "ResponseId")
       final <- bind_rows(final, move)
       deficit_i <- deficit_i - k
+      filled <- filled + k
       
-      log_msg("  Reassigned ", k, " from ", dcat)
+      log_msg("  Reassigned ", k, " from ", dcat, " (", 
+             round(mean(move$Progress), 1), "% avg progress)")
     }
     
     if (deficit_i > 0) {
       log_msg("  WARNING: Could not fill complete deficit (still need ", deficit_i, ")")
+    } else {
+      log_msg("  SUCCESS: Deficit filled (", filled, " reassignments)")
     }
   }
 } else if (total_deficit > 0) {
@@ -436,25 +582,36 @@ final_dist <- final %>%
   count(!!sym(role_col), name = "Final") %>% 
   rename(Category = !!role_col)
 
-# Create verification table
+# Create comprehensive verification table
 verify_tbl <- full_join(final_dist, target, by = "Category") %>%
   mutate(
     Final = replace_na(Final, 0L),
     Target = replace_na(Target, 0L),
     Difference = Final - Target,
     Match = Final == Target,
-    Pct_Difference = round((Final - Target) / Target * 100, 1)
+    Pct_Difference = ifelse(Target > 0, 
+                           round((Final - Target) / Target * 100, 1),
+                           ifelse(Final > 0, 999.9, 0))
   ) %>%
   arrange(desc(abs(Difference)))
 
-# Print verification
-log_msg("\nCategory distribution (showing largest differences first):")
-for (i in seq_len(min(10, nrow(verify_tbl)))) {
+# Enhanced verification output
+log_msg("\nCategory distribution (largest differences first):")
+log_msg(sprintf("%-45s %6s %6s %7s %8s", 
+               "Category", "Target", "Final", "Diff", "Pct Diff"))
+log_msg(paste(rep("-", 75), collapse = ""))
+
+for (i in seq_len(min(15, nrow(verify_tbl)))) {
   row <- verify_tbl[i, ]
   status <- if (row$Match) "✓" else "✗"
-  log_msg(sprintf("  %s %-40s: Target=%3d, Final=%3d, Diff=%+3d (%+.1f%%)",
-                  status, row$Category, row$Target, row$Final, 
+  log_msg(sprintf("%s %-43s %6d %6d %+7d %+7.1f%%",
+                  status, substr(row$Category, 1, 43), 
+                  row$Target, row$Final, 
                   row$Difference, row$Pct_Difference))
+}
+
+if (nrow(verify_tbl) > 15) {
+  log_msg("... and ", nrow(verify_tbl) - 15, " more categories")
 }
 
 # Overall statistics
@@ -467,11 +624,16 @@ log_msg("\n=== OVERALL RESULTS ===")
 log_msg("Final N: ", final_total)
 log_msg("Target N: ", target_total)
 log_msg("Difference: ", final_total - target_total)
-log_msg("Categories perfectly matched: ", n_matched, "/", n_categories)
+log_msg("Categories perfectly matched: ", n_matched, "/", n_categories, 
+        " (", round(n_matched/n_categories * 100, 1), "%)")
 log_msg("Number of reassignments: ", nrow(reassign_log))
 
+# Success/failure message
 if (final_total == target_total) {
   log_msg("\n✓ SUCCESS: Final dataset has exactly ", final_total, " responses")
+} else if (abs(final_total - target_total) <= 5) {
+  log_msg("\n⚠ NEAR SUCCESS: Final has ", final_total, 
+         " responses (", abs(final_total - target_total), " off target)")
 } else {
   warning("\n✗ MISMATCH: Final has ", final_total, " responses, target was ", target_total)
 }
@@ -482,18 +644,42 @@ log_msg("\n=== SAVING OUTPUTS ===")
 # Sort final dataset for consistency
 final <- final %>% arrange(ResponseId)
 
-# Main outputs
-write.csv(final,        config$outfile_final,  row.names = FALSE)
-write.csv(verify_tbl,   config$outfile_verify, row.names = FALSE)
-write.csv(reassign_log, config$outfile_log,    row.names = FALSE)
+# Ensure role column is named appropriately for downstream
+if (role_col != "Final_Role_Category") {
+  final <- final %>% rename(Final_Role_Category = !!sym(role_col))
+  log_msg("Renamed role column to Final_Role_Category for consistency")
+}
 
-# Additional statistics
-write.csv(first_pass_stats, config$outfile_stats, row.names = FALSE)
+# Main outputs with error handling
+tryCatch({
+  write.csv(final, config$outfile_final, row.names = FALSE)
+  log_msg("✓ Final dataset → ", normalizePath(config$outfile_final))
+}, error = function(e) {
+  log_msg("ERROR saving final dataset: ", e$message)
+})
 
-log_msg("✓ Final dataset → ", normalizePath(config$outfile_final))
-log_msg("✓ Verification → ", normalizePath(config$outfile_verify))
-log_msg("✓ Reassignment log → ", normalizePath(config$outfile_log))
-log_msg("✓ Statistics → ", normalizePath(config$outfile_stats))
+tryCatch({
+  write.csv(verify_tbl, config$outfile_verify, row.names = FALSE)
+  log_msg("✓ Verification → ", normalizePath(config$outfile_verify))
+}, error = function(e) {
+  log_msg("ERROR saving verification: ", e$message)
+})
+
+if (nrow(reassign_log) > 0) {
+  tryCatch({
+    write.csv(reassign_log, config$outfile_log, row.names = FALSE)
+    log_msg("✓ Reassignment log → ", normalizePath(config$outfile_log))
+  }, error = function(e) {
+    log_msg("ERROR saving reassignment log: ", e$message)
+  })
+}
+
+tryCatch({
+  write.csv(first_pass_stats, config$outfile_stats, row.names = FALSE)
+  log_msg("✓ Statistics → ", normalizePath(config$outfile_stats))
+}, error = function(e) {
+  log_msg("ERROR saving statistics: ", e$message)
+})
 
 # ========================= REASSIGNMENT ANALYSIS =========================
 if (nrow(reassign_log) > 0) {
@@ -517,13 +703,16 @@ if (nrow(reassign_log) > 0) {
       mean_progress = mean(Progress, na.rm = TRUE),
       median_progress = median(Progress, na.rm = TRUE),
       min_progress = min(Progress, na.rm = TRUE),
-      max_progress = max(Progress, na.rm = TRUE)
+      max_progress = max(Progress, na.rm = TRUE),
+      .groups = "drop"
     )
   
   log_msg("\nReassigned responses progress stats:")
-  log_msg("  Mean: ", round(reassign_progress$mean_progress, 1))
-  log_msg("  Median: ", round(reassign_progress$median_progress, 1))
-  log_msg("  Range: ", reassign_progress$min_progress, " - ", reassign_progress$max_progress)
+  log_msg("  Count: ", reassign_progress$n)
+  log_msg("  Mean: ", round(reassign_progress$mean_progress, 1), "%")
+  log_msg("  Median: ", round(reassign_progress$median_progress, 1), "%")
+  log_msg("  Range: ", round(reassign_progress$min_progress, 1), 
+         "% - ", round(reassign_progress$max_progress, 1), "%")
 }
 
 # ========================= DATA QUALITY METRICS =========================
@@ -538,20 +727,28 @@ final_progress_stats <- final %>%
     min = min(Progress, na.rm = TRUE),
     max = max(Progress, na.rm = TRUE),
     q25 = quantile(Progress, 0.25, na.rm = TRUE),
-    q75 = quantile(Progress, 0.75, na.rm = TRUE)
+    q75 = quantile(Progress, 0.75, na.rm = TRUE),
+    .groups = "drop"
   )
 
 log_msg("Final dataset progress distribution:")
-log_msg("  Mean ± SD: ", round(final_progress_stats$mean, 1), " ± ", 
-        round(final_progress_stats$sd, 1))
+log_msg("  Mean ± SD: ", round(final_progress_stats$mean, 1), "% ± ", 
+        round(final_progress_stats$sd, 1), "%")
 log_msg("  Median [IQR]: ", round(final_progress_stats$median, 1), 
-        " [", round(final_progress_stats$q25, 1), "-", 
+        "% [", round(final_progress_stats$q25, 1), "-", 
         round(final_progress_stats$q75, 1), "]")
-log_msg("  Range: ", final_progress_stats$min, "-", final_progress_stats$max)
+log_msg("  Range: ", round(final_progress_stats$min, 1), 
+       "% - ", round(final_progress_stats$max, 1), "%")
 
 # Completeness by category
+role_col_final <- if ("Final_Role_Category" %in% names(final)) {
+  "Final_Role_Category"
+} else {
+  role_col
+}
+
 completeness_by_cat <- final %>%
-  group_by(!!sym(role_col)) %>%
+  group_by(!!sym(role_col_final)) %>%
   summarise(
     n = n(),
     mean_progress = mean(Progress, na.rm = TRUE),
@@ -562,17 +759,38 @@ completeness_by_cat <- final %>%
 log_msg("\nTop 5 categories by mean progress:")
 for (i in seq_len(min(5, nrow(completeness_by_cat)))) {
   row <- completeness_by_cat[i, ]
-  log_msg(sprintf("  %s: %.1f%% (n=%d)", 
-                  row[[role_col]], row$mean_progress, row$n))
+  log_msg(sprintf("  %d. %s: %.1f%% (n=%d)", 
+                  i,
+                  substr(row[[1]], 1, 40),  # Truncate long names
+                  row$mean_progress, 
+                  row$n))
 }
 
-# ========================= COMPLETION =========================
+# ========================= FINAL SUMMARY =========================
+log_msg("\n=== PROCESS SUMMARY ===")
+log_msg("Initial responses: ", initial_count)
+log_msg("After filtering: ", nrow(df))
+log_msg("Final dataset: ", nrow(final))
+log_msg("Reassignments: ", nrow(reassign_log))
+
+# Calculate runtime
+runtime <- difftime(Sys.time(), 
+                   as.POSIXct(substr(config$log_file, 
+                             nchar(config$log_file) - 18, 
+                             nchar(config$log_file) - 4),
+                             format = "%Y%m%d_%H%M%S"), 
+                   units = "secs")
+
 log_msg("\n=== PROCESS COMPLETE ===")
-log_msg("Runtime: ", round(difftime(Sys.time(), 
-                                   as.POSIXct(substr(config$log_file, 
-                                                    nchar(config$log_file) - 18, 
-                                                    nchar(config$log_file) - 4),
-                                             format = "%Y%m%d_%H%M%S"), 
-                                   units = "secs"), 2), " seconds")
+log_msg("Runtime: ", round(runtime, 2), " seconds")
 log_msg("Log saved to: ", config$log_file)
-log_msg("✓ Done")
+log_msg("✓ Done at ", format(Sys.time(), "%Y-%m-%d %H:%M:%S %Z"))
+
+# Return invisibly for potential downstream use
+invisible(list(
+  final_data = final,
+  verification = verify_tbl,
+  reassignments = reassign_log,
+  statistics = first_pass_stats,
+  config = config
+))

@@ -1,9 +1,13 @@
+#!/usr/bin/env Rscript
+# Safety for Rscript/S4 compatibility (MUST BE FIRST)
+if (!"methods" %in% loadedNamespaces()) library(methods)
+if (!exists(".local", inherits = TRUE)) .local <- function(...) NULL
+
 # manual_classification_correction.R
 # Purpose: Create a manual reassignment template (if you choose hand corrections)
 # Input : data/climate_finance_survey_classified.csv
 # Output: output/manual_reassignment_template.csv
 
-if (!"methods" %in% loadedNamespaces()) library(methods)
 suppressPackageStartupMessages(library(tidyverse))
 dir.create("output", recursive = TRUE, showWarnings = FALSE)
 

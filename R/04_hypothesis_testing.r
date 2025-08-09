@@ -1,3 +1,8 @@
+#!/usr/bin/env Rscript
+# Safety for Rscript/S4 compatibility (MUST BE FIRST)
+if (!"methods" %in% loadedNamespaces()) library(methods)
+if (!exists(".local", inherits = TRUE)) .local <- function(...) NULL
+
 # R/04_hypothesis_testing.R — Comprehensive hypothesis testing and analysis
 # Reproduces all analyses from McKinney (2025) manuscript
 # Author: Richard McKinney

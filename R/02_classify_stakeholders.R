@@ -1,3 +1,8 @@
+#!/usr/bin/env Rscript
+# Safety for Rscript/S4 compatibility (MUST BE FIRST)
+if (!"methods" %in% loadedNamespaces()) library(methods)
+if (!exists(".local", inherits = TRUE)) .local <- function(...) NULL
+
 # 02_classify_stakeholders.R
 # Purpose: Produce stakeholder classifications per Appendix J methodology
 # Outputs:

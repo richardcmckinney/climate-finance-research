@@ -1,6 +1,8 @@
 #!/usr/bin/env Rscript
-suppressPackageStartupMessages(library(methods))
+# Safety for Rscript/S4 compatibility (MUST BE FIRST)
+if (!"methods" %in% loadedNamespaces()) library(methods)
 if (!exists(".local", inherits = TRUE)) .local <- function(...) NULL
+
 # run_all.R
 # Purpose: One-command, deterministic end-to-end pipeline runner + verifier.
 # Assumes repo layout:
@@ -101,7 +103,7 @@ if (CLEAN) {
   if (file.exists("docs/verification_report.md")) file.remove("docs/verification_report.md")
 }
 
-# Runner
+# Updated Runner with proper environment handling
 run_script <- function(path, required = TRUE) {
   options(run_all_current_script = path)
   cli::cli_alert_info(paste("Running", path, "…"))
@@ -109,11 +111,29 @@ run_script <- function(path, required = TRUE) {
     msg <- paste0("Script not found: ", path)
     if (required) stop(msg) else { cli::cli_alert_warning(msg); return(invisible(FALSE)) }
   }
+  
+  # Ensure methods is loaded
   suppressPackageStartupMessages(library(methods))
-  # ensure S4 .local exists in the target environment for packages that expect it
-  if (!exists(".local", envir = .GlobalEnv, inherits = TRUE)) assign(".local", function(...) NULL, envir = .GlobalEnv)
+  
+  # Create new environment with globalenv as parent
   env <- new.env(parent = globalenv())
+  
+  # CRITICAL: Ensure .local exists in both environments
+  if (!exists(".local", envir = env, inherits = TRUE)) {
+    assign(".local", function(...) NULL, envir = env)
+  }
+  if (!exists(".local", envir = .GlobalEnv, inherits = TRUE)) {
+    assign(".local", function(...) NULL, envir = .GlobalEnv)
+  }
+  
+  # Also assign methods package to the environment
+  if (!"package:methods" %in% search()) {
+    attachNamespace("methods")
+  }
+  
+  # Source the script into the prepared environment
   sys.source(path, envir = env, keep.source = FALSE)
+  
   cli::cli_alert_success(paste("Completed", path))
   options(run_all_current_script = NULL)
   invisible(TRUE)

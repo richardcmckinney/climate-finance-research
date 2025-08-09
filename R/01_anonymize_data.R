@@ -1,4 +1,8 @@
 #!/usr/bin/env Rscript
+# Safety for Rscript/S4 compatibility (MUST BE FIRST)
+if (!"methods" %in% loadedNamespaces()) library(methods)
+if (!exists(".local", inherits = TRUE)) .local <- function(...) NULL
+
 # 01_anonymize_data.R — Robust anonymization + Appendix J prep
 # - Drops telemetry/PII columns by name pattern
 # - Scrubs residual PII from free‑text fields (emails/phones/URLs/@handles)
