@@ -104,16 +104,43 @@ df <- df %>%
 # ============================================================================
 # CRITICAL FIX: Use anonymized geographic columns (hq_country/region) instead of raw Q2.2
 
-# Priority order: anonymized columns first, then Q2.2 with warning
+# Priority order: ONLY anonymized columns allowed
 geo_candidates <- c("hq_country", "region", "geography", "country", "location")
 geo_col <- intersect(geo_candidates, names(df))[1]
 
-# Fallback to Q2.2 but with privacy warning
-if (is.na(geo_col) && "Q2.2" %in% names(df)) {
-  inf("! WARNING: Using raw Q2.2 column - should be anonymized for privacy!")
-  inf("! Per README.md, geographic data must be generalized to regions.")
-  geo_col <- "Q2.2"
+# CRITICAL: Fail if no anonymized geographic data exists
+if (is.na(geo_col)) {
+  # Check if raw Q2.2 exists (for diagnostic purposes only)
+  if ("Q2.2" %in% names(df)) {
+    stop(paste(
+      "\n=== CRITICAL ERROR: Geographic Data Privacy Protection ===",
+      "\nRaw geographic data (Q2.2) detected but anonymized columns missing.",
+      "\nThis violates privacy requirements stated in README.md.",
+      "\n",
+      "\nRequired Action:",
+      "\n1. Run anonymization script first: Rscript R/01_anonymize_data.R",
+      "\n2. Ensure geographic data is properly anonymized to regions",
+      "\n3. Verify anonymized columns exist: hq_country, region, or geography",
+      "\n",
+      "\nDO NOT proceed with analysis using raw Q2.2 data.",
+      "\n=========================================================",
+      sep = "\n"
+    ))
+  } else {
+    stop(paste(
+      "\n=== ERROR: No Geographic Data Available ===",
+      "\nNo geographic columns found for analysis.",
+      "\nExpected one of: ", paste(geo_candidates, collapse = ", "),
+      "\n",
+      "\nFigure 4 cannot be generated without geographic data.",
+      sep = "\n"
+    ))
+  }
 }
+
+# Log successful use of anonymized data
+inf("✓ Using anonymized geographic column: ", geo_col)
+inf("✓ Privacy requirements maintained per README.md")
 
 if (!is.na(geo_col)) {
   inf("Geographic columns present:\n  ",
