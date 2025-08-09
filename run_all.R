@@ -1,5 +1,6 @@
 #!/usr/bin/env Rscript
 suppressPackageStartupMessages(library(methods))
+if (!exists(".local", inherits = TRUE)) .local <- function(...) NULL
 # run_all.R
 # Purpose: One-command, deterministic end-to-end pipeline runner + verifier.
 # Assumes repo layout:
@@ -109,6 +110,8 @@ run_script <- function(path, required = TRUE) {
     if (required) stop(msg) else { cli::cli_alert_warning(msg); return(invisible(FALSE)) }
   }
   suppressPackageStartupMessages(library(methods))
+  # ensure S4 .local exists in the target environment for packages that expect it
+  if (!exists(".local", envir = .GlobalEnv, inherits = TRUE)) assign(".local", function(...) NULL, envir = .GlobalEnv)
   env <- new.env(parent = globalenv())
   sys.source(path, envir = env, keep.source = FALSE)
   cli::cli_alert_success(paste("Completed", path))
