@@ -1,4 +1,5 @@
 #!/usr/bin/env Rscript
+suppressPackageStartupMessages(library(methods))
 # run_all.R
 # Purpose: One-command, deterministic end-to-end pipeline runner + verifier.
 # Assumes repo layout:
@@ -21,6 +22,7 @@
 suppressPackageStartupMessages({
   if (!"methods" %in% loadedNamespaces()) library(methods)
   required_pkgs <- c("readr","dplyr","tibble","digest","cli")
+  analysis_pkgs <- c("psych","lavaan","MASS","ggplot2","reshape2","corrplot","broom","effectsize","pwr","gridExtra")
 })
 
 args <- commandArgs(trailingOnly = TRUE)
@@ -35,7 +37,9 @@ WITH_ANALYSIS <- has_flag("--with-analysis")
 options(
   error = function(e) {
     dir.create("docs", showWarnings = FALSE, recursive = TRUE)
+    cur <- getOption("run_all_current_script")
     cat("ERROR: ", conditionMessage(e), "\n\n", file = "docs/last_error.txt")
+    if (!is.null(cur)) cat("While running: ", cur, "\n\n", file = "docs/last_error.txt", append = TRUE)
     cat(paste(capture.output(traceback(30)), collapse = "\n"), file = "docs/last_error.txt", append = TRUE)
     quit(status = 1)
   }
@@ -67,6 +71,10 @@ if (file.exists("renv/activate.R")) source("renv/activate.R")
 install_if_missing(required_pkgs)
 suppressPackageStartupMessages({ library(readr); library(dplyr); library(tibble); library(digest); library(cli) })
 
+# Ensure analysis packages are installed/loaded if WITH_ANALYSIS
+if (WITH_ANALYSIS) install_if_missing(analysis_pkgs)
+if (WITH_ANALYSIS) suppressPackageStartupMessages({ library(psych); library(lavaan); library(MASS); library(ggplot2); library(reshape2) })
+
 # Paths
 scripts <- c("R/01_anonymize_data.R", "R/02_classify_stakeholders.R")
 inputs_dir <- "data_raw"
@@ -94,14 +102,17 @@ if (CLEAN) {
 
 # Runner
 run_script <- function(path, required = TRUE) {
+  options(run_all_current_script = path)
   cli::cli_alert_info(paste("Running", path, "…"))
   if (!file.exists(path)) {
     msg <- paste0("Script not found: ", path)
     if (required) stop(msg) else { cli::cli_alert_warning(msg); return(invisible(FALSE)) }
   }
+  suppressPackageStartupMessages(library(methods))
   env <- new.env(parent = globalenv())
   sys.source(path, envir = env, keep.source = FALSE)
   cli::cli_alert_success(paste("Completed", path))
+  options(run_all_current_script = NULL)
   invisible(TRUE)
 }
 
