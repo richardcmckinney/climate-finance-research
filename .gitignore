@@ -1,11 +1,39 @@
-# R/RStudio files
+# ===========================================
+# Climate Finance Research Pipeline .gitignore
+# Version 4.0 - Comprehensive
+# ===========================================
+
+# ---------------------------------------------
+# R and RStudio Files
+# ---------------------------------------------
 .Rhistory
 .RData
+.RDataTmp
 .Rproj.user/
-*.Rproj
+.Rproj.user
 .Ruserdata
+.Rprofile
+.Renviron
+*.Rproj
+rsconnect/
 
-# Raw data - NEVER commit
+# ---------------------------------------------
+# renv Package Management
+# ---------------------------------------------
+renv/library/
+renv/staging/
+renv/local/
+renv/cellar/
+renv/lock/
+renv/python/
+renv/sandbox/
+renv/source/
+# Keep renv.lock file for reproducibility
+!renv.lock
+
+# ---------------------------------------------
+# Raw Data - CRITICAL: Never commit raw survey data
+# ---------------------------------------------
 data_raw/
 raw_data/
 *.xlsx
@@ -13,113 +41,320 @@ raw_data/
 *_raw.csv
 *_RAW.csv
 raw_*.csv
+survey_export*.csv
+original_*.csv
 
-# Deprecated files - remove if found
+# ---------------------------------------------
+# Deprecated Files - Should be deleted if found
+# ---------------------------------------------
 data/climate_finance_survey_classified.csv
 data/climate_finance_survey_anonymized.csv
+*deprecated*
+*DEPRECATED*
 
-# Sensitive patterns - NEVER commit
+# ---------------------------------------------
+# PII and Sensitive Data Patterns
+# ---------------------------------------------
+# Question 2.2 and related files
 *Q2.2*
 *Q2_2*
+*q2.2*
+*q2_2*
+
+# Email patterns
 *email*
 *Email*
 *EMAIL*
+*mail_address*
+
+# Contact information
 *address*
 *Address*
 *ADDRESS*
 *phone*
 *Phone*
 *PHONE*
+*contact*
+*Contact*
+
+# Organization identifiers
 *organization_names*
 *company_names*
+*company_list*
+*org_list*
+*employer*
+
+# Personal information
 *personal_info*
 *PII*
 *pii*
+*personal_data*
+*identifiable*
+*names_list*
+*respondent_names*
 
-# Temporary and backup files
+# ---------------------------------------------
+# Output Files - Selective inclusion
+# ---------------------------------------------
+# Block most outputs by default
+output/*.csv
+output/*.xlsx
+output/*.rds
+output/*.html
+output/tables/*.csv
+output/models/*.rds
+
+# But explicitly allow key public artifacts
+!output/classification_audit.csv
+!output/hypothesis_testing_summary.csv
+!output/quality_assurance_report.csv
+!output/.gitkeep
+
+# ---------------------------------------------
+# Figures - Review before committing
+# ---------------------------------------------
+figures/*.png
+figures/*.pdf
+figures/*.jpg
+figures/*.jpeg
+figures/*.svg
+figures/*.eps
+
+# Block figures with potential sensitive data
+figures/*Q2.2*
+figures/*geographic*
+figures/*location*
+figures/*country*
+
+# But allow verified anonymized figures
+!figures/figure4_geographic_distribution.png
+!figures/.gitkeep
+
+# ---------------------------------------------
+# Data Files - Selective inclusion
+# ---------------------------------------------
+# Block all CSV by default
+data/*.csv
+
+# But explicitly allow public artifacts
+!data/survey_responses_anonymized_basic.csv
+!data/survey_responses_anonymized_preliminary.csv
+!data/climate_finance_survey_final_1307.csv
+!data/data_dictionary.csv
+!data/.gitkeep
+
+# ---------------------------------------------
+# Documentation - Allow most, block drafts
+# ---------------------------------------------
+docs/*.draft
+docs/*.todo
+docs/drafts/
+docs/working/
+
+# But keep key documentation
+!docs/appendix_j_classification_template.csv
+!docs/checksums.txt
+!docs/verification_report.md
+!docs/.gitkeep
+
+# ---------------------------------------------
+# Temporary and Backup Files
+# ---------------------------------------------
 *.tmp
 *.temp
 *.bak
 *.backup
+*.old
 *~
 .~*
+~$*
+*.swp
+*.swo
+*.orig
 
-# Log files that might contain sensitive info
+# ---------------------------------------------
+# Log Files (may contain sensitive info)
+# ---------------------------------------------
 logs/
 *.log
 error_log.txt
 last_error.txt
 last_error_summary.txt
+debug_*.txt
+trace_*.txt
 
-# Checkpoints (may contain sensitive data)
-checkpoints/
-*.RData
+# ---------------------------------------------
+# R Session and Checkpoint Files
+# ---------------------------------------------
+.RData
 *.rda
 *.rds
+checkpoints/
+.Rproj.user/*
+*.Rcheck/
 
-# OS files
+# Except explicitly needed RDS files
+!data/processed/*.rds
+
+# ---------------------------------------------
+# Operating System Files
+# ---------------------------------------------
+# macOS
 .DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+.Spotlight-V100
+.Trashes
+
+# Windows
 Thumbs.db
-desktop.ini
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.cab
+*.msi
+*.msm
+*.msp
 
-# Output files to review before committing
-output/*.csv
-!output/classification_audit.csv
-!output/hypothesis_testing_summary.csv
-!output/quality_assurance_report.csv
+# Linux
+*~
+.directory
+.Trash-*
 
-# Figures with potential geographic data
-figures/*Q2.2*
-figures/*geographic*
-!figures/figure4_geographic_distribution.png  # Only if verified anonymized
-
-# Documentation drafts
-*.draft
-*.todo
-TODO.md
-
-# Personal notes
-notes/
-personal/
-private/
-
-# IDE files
+# ---------------------------------------------
+# IDE and Editor Files
+# ---------------------------------------------
+# Visual Studio Code
 .vscode/
-.idea/
-*.swp
-*.swo
+*.code-workspace
 
+# RStudio
+.Rproj.user
+
+# JetBrains IDEs
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# Vim
+[._]*.s[a-v][a-z]
+[._]*.sw[a-p]
+Session.vim
+.netrwhist
+
+# Emacs
+*~
+\#*\#
+/.emacs.desktop
+/.emacs.desktop.lock
+*.elc
+auto-save-list
+
+# ---------------------------------------------
 # Python (if mixed environment)
+# ---------------------------------------------
 __pycache__/
 *.py[cod]
 *$py.class
 .Python
 env/
 venv/
+ENV/
+.venv
+pip-log.txt
+pip-delete-this-directory.txt
 
-# Package files
+# ---------------------------------------------
+# Package and Archive Files
+# ---------------------------------------------
+*.tar
 *.tar.gz
 *.zip
+*.7z
+*.rar
+*.gz
+*.bz2
+*.xz
 
-# Credentials (should never exist, but safety)
+# ---------------------------------------------
+# Database Files
+# ---------------------------------------------
+*.sql
+*.sqlite
+*.sqlite3
+*.db
+*.mdb
+*.accdb
+
+# ---------------------------------------------
+# Credentials and Secrets - NEVER commit
+# ---------------------------------------------
 *.key
 *.pem
+*.p12
+*.pfx
 *credentials*
+*credential*
 *token*
 *secret*
+*password*
 .env
 .env.*
+.env.local
+.env.*.local
+config/secrets.yml
+auth.json
 
-# Large files
-*.sql
-*.db
-*.sqlite
+# ---------------------------------------------
+# Personal Notes and Working Files
+# ---------------------------------------------
+notes/
+personal/
+private/
+scratch/
+TODO.md
+NOTES.md
+working_notes/
+my_notes/
 
-# Ensure critical files ARE tracked
+# ---------------------------------------------
+# Large Binary Files
+# ---------------------------------------------
+*.mp4
+*.avi
+*.mov
+*.wmv
+*.flv
+*.mkv
+*.webm
+*.mp3
+*.wav
+*.flac
+
+# ---------------------------------------------
+# CRITICAL FILES TO KEEP - Never ignore these
+# ---------------------------------------------
 !R/00_config.R
+!R/appendix_j_config.R
+!R/01_anonymize_data.R
+!R/02_classify_stakeholders.R
+!R/get_exact_1307.R
+!R/03_main_analysis.R
+!R/04_hypothesis_testing.R
 !R/99_quality_checks.R
-!docs/appendix_j_classification_template.csv
-!docs/checksums.txt
-!docs/verification_report.md
-!README.md
 !run_all.R
+!README.md
+!LICENSE
+!.editorconfig
+!.gitignore
+
+# ---------------------------------------------
+# End of .gitignore
+# ---------------------------------------------
