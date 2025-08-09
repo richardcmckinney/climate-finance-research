@@ -56,6 +56,18 @@ normalize_text <- function(x) {
     str_squish()
 }
 
+# Helper function to check if text contains climate-related terms
+is_climate_related <- function(text) {
+  climate_terms <- "climate|clean|green|sustain|carbon|emission|renewable|solar|wind|battery|storage|hydrogen|bio|ccus|adapt|energy|electric|environmental|esg"
+  str_detect(text, climate_terms)
+}
+
+# Helper function to check if text contains entrepreneur-related terms
+is_entrepreneur_related <- function(text) {
+  entrepreneur_terms <- "entrepreneur|founder|co[- ]?founder|ceo|cto|startup|venture\\s*builder|launching|started"
+  str_detect(text, entrepreneur_terms)
+}
+
 # Comprehensive classification based on Appendix J methodology
 classify_stakeholder <- function(raw_text, other_text) {
   # Combine both texts for analysis
@@ -70,9 +82,8 @@ classify_stakeholder <- function(raw_text, other_text) {
   # Priority order classification based on Appendix J
   
   # 1. Entrepreneur in Climate Technology (highest priority for climate-specific)
-  # FIXED: Removed broken lookahead pattern, now uses proper regex matching
-  if (str_detect(combined, "(entrepreneur|founder|co[- ]?founder|ceo|cto|startup|venture\\s*builder|launching|started).*(climate|clean|green|sustain|carbon|emission|renewable|solar|wind|battery|storage|hydrogen|bio|ccus|adapt|energy|electric|environmental|esg)") ||
-      str_detect(combined, "(climate|clean|green|sustain|carbon|emission|renewable|solar|wind|battery|storage|hydrogen|bio|ccus|adapt|energy|electric|environmental|esg).*(entrepreneur|founder|co[- ]?founder|ceo|cto|startup|venture\\s*builder|launching|started)")) {
+  # FIXED: Separated complex regex into simpler helper functions
+  if (is_entrepreneur_related(combined) && is_climate_related(combined)) {
     return("Entrepreneur in Climate Technology")
   }
   
@@ -181,7 +192,7 @@ classify_stakeholder <- function(raw_text, other_text) {
   
   # 11. Individual/Small Business
   if (str_detect(combined, "entrepreneur|founder|business\\s*owner|self\\s*employ|startup|small\\s*business") && 
-      !str_detect(combined, "climate|clean|green|sustain|esg")) {
+      !is_climate_related(combined)) {
     return("Miscellaneous and Individual Respondents")
   }
   
@@ -314,6 +325,10 @@ harmonized_sample <- classification_df %>%
   select(role_other, final_category_appendix_j) %>%
   slice_sample(n = min(10, sum(classification_df$needs_harmonization, na.rm = TRUE)))
 
-print(harmonized_sample)
+if (nrow(harmonized_sample) > 0) {
+  print(harmonized_sample)
+} else {
+  message("No harmonized entries to display")
+}
 
 message("\n✓ Classification complete!")

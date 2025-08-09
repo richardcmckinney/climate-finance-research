@@ -21,15 +21,18 @@ suppressPackageStartupMessages({
 # ------------------------- Configuration -------------------------
 config <- list(
   pii_patterns = c(
-    "ip[_ ]?address|^IPAddress$",
-    "email|e[-_ ]?mail|RecipientEmail",
-    "first[ _]?name|last[ _]?name|full[_ ]?name",
-    "recipient|Recipient|ExternalDataReference|external.*reference",
-    "latitude|longitude|LocationLatitude|LocationLongitude",
-    "\\bhq_?address|address[ _]?line|street|city|state|zip|postal",
-    "phone|mobile|cell|tel|fax",
-    "website|url",
-    "^ResponseId$|^StartDate$|^EndDate$|^RecordedDate$"
+    "(?i)ip[_ ]?address|^IPAddress$",
+    "(?i)email|e[-_ ]?mail|RecipientEmail",
+    "(?i)first[_ ]?name|last[_ ]?name|full[_ ]?name|^name$",
+    "(?i)recipient|Recipient|ExternalDataReference|external.*reference",
+    "(?i)latitude|longitude|LocationLatitude|LocationLongitude",
+    "(?i)\\bhq_?address|address[_ ]?line|street|city|^state$|zip|postal",
+    "(?i)phone|mobile|cell|tel|fax",
+    "(?i)website|url|^link$",
+    "^ResponseId$|^StartDate$|^EndDate$|^RecordedDate$",
+    "(?i)birth.*date|dob|date.*birth",
+    "(?i)ssn|social.*security",
+    "(?i)passport|driver.*license|license.*number"
   ),
   output_paths = list(
     basic       = "data/survey_responses_anonymized_basic.csv",
@@ -42,9 +45,15 @@ config <- list(
 
 # ------------------------- Helpers -------------------------
 find_col <- function(df, candidates = character(0), pattern = NULL) {
+  if (!is.data.frame(df)) {
+    cli::cli_warn("find_col: input is not a data frame")
+    return(NA_character_)
+  }
+  
   nms <- names(df)
   hit <- candidates[candidates %in% nms]
   if (length(hit)) return(hit[1])
+  
   if (!is.null(pattern)) {
     rx <- grep(pattern, nms, ignore.case = TRUE, value = TRUE)
     if (length(rx)) return(rx[1])
@@ -55,16 +64,38 @@ find_col <- function(df, candidates = character(0), pattern = NULL) {
 safe_month <- function(x) {
   if (is.null(x) || length(x) == 0) return(character(0))
   x <- as.character(x)
-  parsed <- suppressWarnings(as.POSIXct(x, format = "%Y-%m-%d %H:%M:%S", tz = "UTC"))
+  
+  # Try multiple date formats
+  date_formats <- c(
+    "%Y-%m-%d %H:%M:%S",
+    "%Y-%m-%d %H:%M",
+    "%m/%d/%Y %H:%M:%S",
+    "%m/%d/%Y %H:%M",
+    "%d/%m/%Y %H:%M:%S",
+    "%d/%m/%Y %H:%M",
+    "%Y-%m-%d",
+    "%m/%d/%Y",
+    "%d/%m/%Y",
+    "%Y/%m/%d"
+  )
+  
+  parsed <- as.POSIXct(NA)
+  for (fmt in date_formats) {
+    attempt <- suppressWarnings(as.POSIXct(x, format = fmt, tz = "UTC"))
+    parsed[!is.na(attempt)] <- attempt[!is.na(attempt)]
+  }
+  
+  # For any remaining NAs, try lubridate
   if (anyNA(parsed)) {
     na_idx <- which(is.na(parsed))
     parsed[na_idx] <- suppressWarnings(lubridate::parse_date_time(
       x[na_idx],
-      orders = c("Y-m-d H:M", "m/d/Y H:M:S", "m/d/Y H:M",
-                 "d/m/Y H:M:S", "d/m/Y H:M", "Y-m-d", "m/d/Y", "d/m/Y"),
+      orders = c("ymd HMS", "ymd HM", "mdy HMS", "mdy HM", 
+                 "dmy HMS", "dmy HM", "ymd", "mdy", "dmy"),
       tz = "UTC", quiet = TRUE
     ))
   }
+  
   out <- format(parsed, "%Y-%m")
   out[is.na(parsed)] <- NA_character_
   out
@@ -74,19 +105,35 @@ hash_id <- function(x, pref) {
   vapply(as.character(x), function(i) {
     if (is.na(i) || i == "") return(NA_character_)
     paste0(pref, "_", substr(digest(i, algo = "sha256"), 1, config$hash_length))
-  }, character(1))
+  }, character(1), USE.NAMES = FALSE)
 }
 
 scrub_text <- function(x) {
   if (!is.character(x)) return(x)
-  # emails
-  x <- gsub("(?i)[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}", "[REDACTED_EMAIL]", x, perl = TRUE)
-  # phone numbers (international and common formats)
-  x <- gsub("(?i)\\+?\\d[\\d\\s().-]{7,}\\d", "[REDACTED_PHONE]", x, perl = TRUE)
-  # URLs (use POSIX class to avoid \\S portability issues)
-  x <- gsub("(?i)(https?://[^[:space:]]+|www\\.[A-Za-z0-9.-]+\\.[A-Za-z]{2,}[^[:space:]]*)", "[REDACTED_URL]", x, perl = TRUE)
-  # social handles like @username
-  x <- gsub("(^|\\s)@[A-Za-z0-9_]{2,15}\\b", "\\1[REDACTED_HANDLE]", x, perl = TRUE)
+  
+  # Email addresses - more comprehensive pattern
+  x <- gsub("(?i)[A-Za-z0-9._%+\\-]+@[A-Za-z0-9.\\-]+\\.[A-Za-z]{2,}", "[REDACTED_EMAIL]", x, perl = TRUE)
+  
+  # Phone numbers - multiple formats
+  # International format
+  x <- gsub("\\+?[1-9]\\d{0,3}[\\s\\-\\.]?\\(?\\d{1,4}\\)?[\\s\\-\\.]?\\d{1,4}[\\s\\-\\.]?\\d{1,9}", "[REDACTED_PHONE]", x, perl = TRUE)
+  # US format (xxx) xxx-xxxx
+  x <- gsub("\\(?\\d{3}\\)?[\\s\\-\\.]?\\d{3}[\\s\\-\\.]?\\d{4}", "[REDACTED_PHONE]", x, perl = TRUE)
+  # Generic phone pattern
+  x <- gsub("\\b\\d{3,4}[\\s\\-\\.]\\d{3,4}[\\s\\-\\.]\\d{3,4}\\b", "[REDACTED_PHONE]", x, perl = TRUE)
+  
+  # URLs - comprehensive pattern
+  x <- gsub("(?i)(https?://[^\\s]+|ftp://[^\\s]+|www\\.[A-Za-z0-9\\-]+\\.[A-Za-z]{2,}[^\\s]*)", "[REDACTED_URL]", x, perl = TRUE)
+  
+  # Social media handles
+  x <- gsub("@[A-Za-z0-9_]{1,30}\\b", "[REDACTED_HANDLE]", x, perl = TRUE)
+  
+  # Credit card numbers (basic pattern)
+  x <- gsub("\\b\\d{4}[\\s\\-]?\\d{4}[\\s\\-]?\\d{4}[\\s\\-]?\\d{4}\\b", "[REDACTED_CARD]", x, perl = TRUE)
+  
+  # SSN pattern (xxx-xx-xxxx)
+  x <- gsub("\\b\\d{3}-\\d{2}-\\d{4}\\b", "[REDACTED_SSN]", x, perl = TRUE)
+  
   x
 }
 
@@ -108,61 +155,119 @@ map_prelim_role <- function(role, other_text) {
   )
   z <- tolower(paste(coalesce(role, ""), coalesce(other_text, "")))
   vapply(z, function(txt) {
-    for (cat in names(patterns)) if (grepl(patterns[[cat]], txt, perl = TRUE)) return(cat)
+    for (cat in names(patterns)) {
+      if (grepl(patterns[[cat]], txt, perl = TRUE)) return(cat)
+    }
     "Other"
   }, character(1), USE.NAMES = FALSE)
+}
+
+# ------------------------- Validate Environment -------------------------
+# Check for required directories
+if (!dir.exists("data_raw")) {
+  cli::cli_abort("Directory 'data_raw' not found. Please ensure raw data directory exists.")
+}
+
+# Create output directories
+for (path in config$output_paths) {
+  dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
 }
 
 # ------------------------- Load data -------------------------
 cli::cli_h1("PART 1: BASIC ANONYMIZATION")
 raw_files <- list.files("data_raw", pattern = "\\.csv$", full.names = TRUE)
-stopifnot(length(raw_files) >= 1)
+
+if (length(raw_files) == 0) {
+  cli::cli_abort("No CSV files found in data_raw directory")
+}
+
 raw_in <- raw_files[1]
 cli::cli_inform(paste("Raw input:", raw_in))
 
-raw <- readr::read_csv(raw_in, guess_max = 10000, show_col_types = FALSE)
+# Load with error handling
+raw <- tryCatch({
+  readr::read_csv(raw_in, guess_max = 10000, show_col_types = FALSE)
+}, error = function(e) {
+  cli::cli_abort(paste("Failed to read CSV file:", e$message))
+})
+
+if (nrow(raw) == 0) {
+  cli::cli_abort("Input file contains no data rows")
+}
+
 cli::cli_inform(paste("Loaded", nrow(raw), "rows and", ncol(raw), "columns"))
 
 # Column detection
-col_response_id <- find_col(raw, c("ResponseId", "_recordId", "Response ID"), pattern = "^response[_ ]?id$|^_recordid$")
-col_start  <- find_col(raw, c("StartDate","startDate","Start Date"), pattern = "^start[ _]?date$")
-col_end    <- find_col(raw, c("EndDate","endDate","End Date"), pattern = "^end[ _]?date$")
-col_record <- find_col(raw, c("RecordedDate","recordedDate","Recorded Date"), pattern = "^recorded[ _]?date$")
+col_response_id <- find_col(raw, c("ResponseId", "_recordId", "Response ID", "response_id"), 
+                           pattern = "^response[_ ]?id$|^_recordid$")
+col_start  <- find_col(raw, c("StartDate", "startDate", "Start Date", "start_date"), 
+                      pattern = "^start[_ ]?date$")
+col_end    <- find_col(raw, c("EndDate", "endDate", "End Date", "end_date"), 
+                      pattern = "^end[_ ]?date$")
+col_record <- find_col(raw, c("RecordedDate", "recordedDate", "Recorded Date", "recorded_date"), 
+                      pattern = "^recorded[_ ]?date$")
 
 # role fields (for template)
-col_role        <- find_col(raw, c("Q2.1", "QID174"), pattern = "best describes your role|\\bQ2\\.1\\b|QID174")
-col_role_other  <- find_col(raw, c("Q2.1_12_TEXT", "QID174_12_TEXT"), pattern = "other.*text|Q2\\.1.*TEXT|QID174_.*TEXT")
+col_role        <- find_col(raw, c("Q2.1", "QID174", "role"), 
+                           pattern = "best describes your role|\\bQ2\\.1\\b|QID174")
+col_role_other  <- find_col(raw, c("Q2.1_12_TEXT", "QID174_12_TEXT", "role_other"), 
+                           pattern = "other.*text|Q2\\.1.*TEXT|QID174_.*TEXT")
 
 # Build anonymized basic
-resp_id <- if (!is.na(col_response_id)) raw[[col_response_id]] else seq_len(nrow(raw))
+resp_id <- if (!is.na(col_response_id)) {
+  raw[[col_response_id]]
+} else {
+  cli::cli_warn("ResponseId column not found, using sequential IDs")
+  seq_len(nrow(raw))
+}
+
+# Compile PII regex pattern
 pii_regex <- paste(config$pii_patterns, collapse = "|")
 
+# Create anonymized dataset
 an_basic <- raw %>%
   mutate(
     respondent_id = hash_id(resp_id, "RESP"),
-    across(.cols = any_of(c(col_start, col_end, col_record)), .fns = ~ safe_month(.x), .names = "{.col}_month")
-  ) %>%
-  select(-matches(pii_regex, ignore.case = TRUE), -any_of(c(col_start, col_end, col_record))) %>%
-  relocate(respondent_id, .before = 1)
+    across(.cols = any_of(c(col_start, col_end, col_record)), 
+           .fns = ~ safe_month(.x), 
+           .names = "{.col}_month")
+  )
 
-# Scrub PII in character columns EXCEPT respondent_id (to preserve deterministic keys)
-char_cols <- names(an_basic)[vapply(an_basic, is.character, logical(1))]
-char_cols <- setdiff(char_cols, "respondent_id")
-if (length(char_cols)) {
-  an_basic <- an_basic %>% mutate(across(all_of(char_cols), scrub_text))
+# Remove PII columns
+cols_to_remove <- grep(pii_regex, names(an_basic), ignore.case = TRUE, value = TRUE)
+if (length(cols_to_remove) > 0) {
+  cli::cli_inform(paste("Removing", length(cols_to_remove), "PII columns"))
+  an_basic <- an_basic %>% 
+    select(-all_of(cols_to_remove)) %>%
+    select(-any_of(c(col_start, col_end, col_record)))
 }
 
-# Save basic
-cli::cli_inform("Anonymizing data (removing PII & scrubbing free text)...")
+# Ensure respondent_id is first
+an_basic <- an_basic %>%
+  relocate(respondent_id, .before = 1)
+
+# Scrub PII in character columns EXCEPT respondent_id
+char_cols <- names(an_basic)[vapply(an_basic, is.character, logical(1))]
+char_cols <- setdiff(char_cols, "respondent_id")
+
+if (length(char_cols) > 0) {
+  cli::cli_inform(paste("Scrubbing PII from", length(char_cols), "text columns"))
+  an_basic <- an_basic %>% 
+    mutate(across(all_of(char_cols), scrub_text))
+}
+
+# Save basic anonymized file
+cli::cli_inform("Saving basic anonymized data...")
 readr::write_csv(an_basic, config$output_paths$basic)
-cli::cli_inform(paste("Saved basic anonymized data ->", normalizePath(config$output_paths$basic)))
+cli::cli_inform(paste("✓ Saved basic anonymized data ->", normalizePath(config$output_paths$basic)))
 
 # ------------------------- Appendix J preparation -------------------------
 cli::cli_h1("PART 2: PREPARING FOR APPENDIX J CLASSIFICATIONS")
+
 if (!is.na(col_role)) {
   role_df <- tibble(
     respondent_id = an_basic$respondent_id,
-    role_raw      = raw[[col_role]],
+    role_raw      = if (!is.na(col_role)) raw[[col_role]] else NA_character_,
     role_other    = if (!is.na(col_role_other)) raw[[col_role_other]] else NA_character_
   )
 
@@ -176,7 +281,7 @@ if (!is.na(col_role)) {
     distinct(respondent_id, .keep_all = TRUE)
 
   readr::write_csv(template, config$output_paths$template)
-  cli::cli_inform(paste("Classification template ->", normalizePath(config$output_paths$template)))
+  cli::cli_inform(paste("✓ Classification template ->", normalizePath(config$output_paths$template)))
 
   out_prelim <- an_basic %>%
     left_join(template %>% select(respondent_id, preliminary_category), by = "respondent_id") %>%
@@ -185,7 +290,7 @@ if (!is.na(col_role)) {
     distinct(respondent_id, .keep_all = TRUE)
 
   readr::write_csv(out_prelim, config$output_paths$preliminary)
-  cli::cli_inform(paste("Preliminary classified data ->", normalizePath(config$output_paths$preliminary)))
+  cli::cli_inform(paste("✓ Preliminary classified data ->", normalizePath(config$output_paths$preliminary)))
 } else {
   cli::cli_warn("Role column not found; skipping template and preliminary outputs.")
 }
@@ -195,7 +300,9 @@ cli::cli_h1("ANONYMIZATION SUMMARY")
 cli::cli_inform(paste("Original columns:", ncol(raw)))
 cli::cli_inform(paste("Anonymized columns:", ncol(an_basic)))
 cli::cli_inform(paste("Rows preserved:", nrow(an_basic)))
+cli::cli_inform(paste("PII columns removed:", length(cols_to_remove)))
 
+# Create data dictionary
 dict <- tibble(
   column_name      = names(an_basic),
   description      = "",
@@ -208,5 +315,16 @@ dict <- tibble(
   )
 
 readr::write_csv(dict, config$output_paths$dictionary)
-cli::cli_inform(paste("Data dictionary ->", normalizePath(config$output_paths$dictionary)))
-cli::cli_h1("PROCESS COMPLETE")
+cli::cli_inform(paste("✓ Data dictionary ->", normalizePath(config$output_paths$dictionary)))
+
+# Final validation
+cli::cli_h1("VALIDATION")
+if (nrow(an_basic) != nrow(raw)) {
+  cli::cli_warn(paste("Row count changed:", nrow(raw), "->", nrow(an_basic)))
+}
+
+if (any(duplicated(an_basic$respondent_id))) {
+  cli::cli_warn("Duplicate respondent IDs detected!")
+}
+
+cli::cli_h1("✓ PROCESS COMPLETE")
