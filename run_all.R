@@ -1,13 +1,15 @@
 #!/usr/bin/env Rscript
-# run_all.R - Enhanced Pipeline Runner v2.0
+# run_all.R - Enhanced Pipeline Runner v3.0
 # Purpose: Robust, deterministic end-to-end pipeline runner with comprehensive error handling
 # Description:
 #   This script executes the entire data processing and analysis pipeline with:
 #   - S4 method dispatch protection (.local shim)
-#   - Case-sensitive filesystem compatibility
 #   - Enhanced error logging and recovery
 #   - Per-script method safety enforcement
-#   - Comprehensive verification and checkpointing
+#   - Centralized configuration management
+#   - Delegation to dedicated quality checks
+#
+# NAMING CONVENTION: All R scripts must use uppercase .R extension for consistency
 #
 # Flags:
 #   --clean           Remove all known outputs before running
@@ -58,7 +60,30 @@ options(
 )
 
 # =============================================================================
-# 2. ARGUMENT PARSING & CONFIGURATION
+# 2. LOAD CENTRAL CONFIGURATION
+# =============================================================================
+
+# Source the central configuration file EARLY to get PATHS and other settings
+config_file <- "R/00_config.R"
+if (!file.exists(config_file)) {
+  stop(sprintf("Central configuration file not found: %s\nThis file is required for pipeline execution.", config_file))
+}
+
+# Source configuration with error handling
+tryCatch({
+  source(config_file, local = FALSE)
+  message("✓ Central configuration loaded from ", config_file)
+}, error = function(e) {
+  stop(sprintf("Failed to load central configuration: %s", e$message))
+})
+
+# Verify PATHS was loaded
+if (!exists("PATHS") || !is.list(PATHS)) {
+  stop("PATHS configuration not found after sourcing ", config_file)
+}
+
+# =============================================================================
+# 3. ARGUMENT PARSING & CONFIGURATION
 # =============================================================================
 
 args <- commandArgs(trailingOnly = TRUE)
@@ -88,7 +113,7 @@ if (DEBUG) {
 }
 
 # =============================================================================
-# 3. ENHANCED ERROR HANDLING
+# 4. ENHANCED ERROR HANDLING
 # =============================================================================
 
 # Create docs directory early for error logging
@@ -136,11 +161,18 @@ options(error = function() {
     "",
     "=== ENVIRONMENT VARIABLES ===",
     paste("TZ:", Sys.getenv("TZ")),
-    paste("PATH:", Sys.getenv("PATH"))
+    paste("PATH:", Sys.getenv("PATH")),
+    "",
+    "=== PIPELINE STAGE ===",
+    paste("Current Stage:", if (exists("pipeline_stage")) pipeline_stage else "Unknown"),
+    paste("Current Script:", if (exists("current_script")) current_script else "Unknown")
   )
   
-  # Write to both error log files
-  writeLines(error_log_content, "docs/error_log.txt")
+  # Use paths from central config for error logs
+  error_log_path <- if (!is.null(PATHS$error_log)) PATHS$error_log else "docs/error_log.txt"
+  
+  # Write to error log files
+  writeLines(error_log_content, error_log_path)
   writeLines(error_log_content, "docs/last_error.txt")  # Quick access file
   
   # Also create a minimal error summary for quick diagnosis
@@ -153,7 +185,7 @@ options(error = function() {
   writeLines(error_summary, "docs/last_error_summary.txt")
   
   message("\n📄 Error logs saved to:")
-  message("   - docs/error_log.txt (full log)")
+  message("   - ", error_log_path, " (full log)")
   message("   - docs/last_error.txt (duplicate for quick access)")
   message("   - docs/last_error_summary.txt (brief summary)")
   
@@ -162,7 +194,7 @@ options(error = function() {
 })
 
 # =============================================================================
-# 4. PACKAGE MANAGEMENT
+# 5. PACKAGE MANAGEMENT
 # =============================================================================
 
 # Define required packages by category
@@ -251,27 +283,10 @@ suppressPackageStartupMessages({
 })
 
 # =============================================================================
-# 5. FILE PATHS & SCRIPT DEFINITIONS
+# 6. SCRIPT DEFINITIONS
 # =============================================================================
 
-# Canonical file paths (order matters for dependency tracking)
-paths <- list(
-  # Core outputs (always created)
-  basic_anon = "data/survey_responses_anonymized_basic.csv",
-  prelim_classified = "data/survey_responses_anonymized_preliminary.csv",
-  class_template = "docs/appendix_j_classification_template.csv",
-  dictionary = "data/data_dictionary.csv",
-  
-  # Analysis outputs (created with --with-analysis)
-  final_1307 = "data/climate_finance_survey_final_1307.csv",
-  
-  # Verification outputs
-  checksums = "docs/checksums.txt",
-  verification = "docs/verification_report.md"
-)
-
-# Script definitions with case-sensitive filenames
-# CRITICAL FIX: Use lowercase .r extension to match actual filesystem
+# Script definitions - all scripts should use consistent .R extension
 scripts_base <- c(
   "R/01_anonymize_data.R",
   "R/02_classify_stakeholders.R"
@@ -280,39 +295,38 @@ scripts_base <- c(
 scripts_analysis <- c(
   "R/get_exact_1307.R",
   "R/03_main_analysis.R",
-  "R/04_hypothesis_testing.r"  # FIX: Changed from .R to .r for case-sensitive compatibility
+  "R/04_hypothesis_testing.R"  # Enforcing consistent .R extension
 )
 
-# Validate script existence with case-sensitive check
-validate_scripts <- function(script_list) {
+# Simple validation - fail clearly if files don't exist
+validate_scripts <- function(script_list, stage_name) {
+  missing_scripts <- character()
+  
   for (script in script_list) {
     if (!file.exists(script)) {
-      # Try alternative case if not found
-      alt_script <- if (endsWith(script, ".R")) {
-        sub("\\.R$", ".r", script)
-      } else {
-        sub("\\.r$", ".R", script)
-      }
-      
-      if (file.exists(alt_script)) {
-        warning(sprintf("Script %s not found, but %s exists. Update script list for consistency.", 
-                       script, alt_script))
-        # Update the script list
-        script_list[script_list == script] <- alt_script
-      } else {
-        stop(sprintf("Required script not found: %s", script))
-      }
+      missing_scripts <- c(missing_scripts, script)
     }
   }
-  return(script_list)
+  
+  if (length(missing_scripts) > 0) {
+    stop(sprintf(
+      "Required %s script(s) not found:\n  %s\n\nPlease ensure all scripts use consistent .R extension and exist in the R/ directory.",
+      stage_name,
+      paste(missing_scripts, collapse = "\n  ")
+    ))
+  }
+  
+  invisible(TRUE)
 }
 
-# Validate and potentially fix script paths
-scripts_base <- validate_scripts(scripts_base)
-scripts_analysis <- validate_scripts(scripts_analysis)
+# Validate script existence
+validate_scripts(scripts_base, "base pipeline")
+if (WITH_ANALYSIS) {
+  validate_scripts(scripts_analysis, "analysis pipeline")
+}
 
 # =============================================================================
-# 6. ENHANCED SCRIPT EXECUTION WITH METHOD SAFETY
+# 7. ENHANCED SCRIPT EXECUTION WITH METHOD SAFETY
 # =============================================================================
 
 # Enhanced script runner with S4 method protection and checkpointing
@@ -356,6 +370,9 @@ run_script <- function(path, stage_name = NULL) {
     
     # Copy essential objects to script environment
     script_env$.local <- .local
+    script_env$PATHS <- PATHS  # Pass central configuration
+    script_env$STANDARD_COLUMNS <- STANDARD_COLUMNS
+    script_env$QUALITY_PARAMS <- QUALITY_PARAMS
     
     # Source the script
     if (DEBUG) {
@@ -402,10 +419,21 @@ save_checkpoint <- function(stage) {
 }
 
 # =============================================================================
-# 7. DATA VALIDATION & PREPARATION
+# 8. DATA VALIDATION & PREPARATION
 # =============================================================================
 
 pipeline_stage <- "Data Validation"
+
+# Use validate_stage function from config if available
+if (exists("validate_stage", mode = "function")) {
+  # Validate we can run the base pipeline
+  tryCatch({
+    validate_stage("anonymize")  # First stage has no requirements
+  }, error = function(e) {
+    # This is expected for first run
+    if (DEBUG) message("Note: First run detected (no prior outputs)")
+  })
+}
 
 # Validate raw data existence
 if (!dir.exists("data_raw")) {
@@ -433,20 +461,32 @@ for (dir in output_dirs) {
 }
 
 # =============================================================================
-# 8. OPTIONAL CLEANING
+# 9. OPTIONAL CLEANING
 # =============================================================================
 
 if (CLEAN) {
   pipeline_stage <- "Cleaning"
   cli::cli_h1("Cleaning Previous Outputs")
   
-  # Files to remove
+  # Use paths from central configuration
   files_to_remove <- c(
-    unlist(paths),
-    "docs/error_log.txt",
+    # Core outputs
+    PATHS$basic_anon,
+    PATHS$preliminary_classified,
+    PATHS$classification_template,
+    PATHS$dictionary,
+    PATHS$final_1307,
+    # Verification outputs
+    PATHS$checksums,
+    PATHS$verification_report,
+    PATHS$error_log,
+    # Additional files
     "docs/last_error.txt",
     "docs/last_error_summary.txt"
   )
+  
+  # Remove NULL paths
+  files_to_remove <- files_to_remove[!sapply(files_to_remove, is.null)]
   
   # Remove files
   removed_count <- 0
@@ -472,7 +512,22 @@ if (CLEAN) {
 }
 
 # =============================================================================
-# 9. MAIN PIPELINE EXECUTION
+# 10. CHECK FOR DEPRECATED FILES
+# =============================================================================
+
+# Use check_deprecated from config if available
+if (exists("check_deprecated", mode = "function")) {
+  deprecated <- check_deprecated(verbose = FALSE)
+  if (length(deprecated) > 0) {
+    cli::cli_alert_warning(sprintf("Found %d deprecated file(s). Consider removing:", length(deprecated)))
+    for (f in deprecated) {
+      cli::cli_text(sprintf("  - %s", f))
+    }
+  }
+}
+
+# =============================================================================
+# 11. MAIN PIPELINE EXECUTION
 # =============================================================================
 
 cli::cli_h1("Pipeline Execution")
@@ -503,235 +558,86 @@ total_time <- difftime(Sys.time(), overall_start, units = "mins")
 cli::cli_alert_success(sprintf("Pipeline execution completed in %.1f minutes", total_time))
 
 # =============================================================================
-# 10. COMPREHENSIVE VERIFICATION
+# 12. VERIFICATION USING QUALITY CHECKS SCRIPT
 # =============================================================================
 
-verify_outputs <- function(artifact_paths, is_analysis_run) {
-  pipeline_stage <- "Verification"
-  cli::cli_h1("Output Verification")
-  
-  verification_results <- list(
-    timestamp = format(Sys.time(), "%Y-%m-%d %H:%M:%S UTC"),
-    all_ok = TRUE,
-    checks = list()
-  )
-  
-  report_lines <- c(
-    "# Pipeline Verification Report",
-    "",
-    sprintf("**Generated:** %s", verification_results$timestamp),
-    sprintf("**Pipeline Mode:** %s", ifelse(is_analysis_run, "Full Analysis", "Base Only")),
-    sprintf("**R Version:** %s", R.version.string),
-    ""
-  )
-  
-  # --- Check 1: File Presence ---
-  cli::cli_h2("1. File Presence Check")
-  
-  core_artifacts <- artifact_paths[c("basic_anon", "prelim_classified", 
-                                    "class_template", "dictionary")]
-  analysis_artifacts <- artifact_paths["final_1307"]
-  
-  artifacts_to_check <- if (is_analysis_run) {
-    c(core_artifacts, analysis_artifacts)
-  } else {
-    core_artifacts
-  }
-  
-  file_check_results <- list()
-  for (name in names(artifacts_to_check)) {
-    path <- artifacts_to_check[[name]]
-    exists <- file.exists(path)
-    file_check_results[[name]] <- exists
-    
-    if (exists) {
-      size_mb <- file.info(path)$size / (1024^2)
-      cli::cli_alert_success(sprintf("✓ %s (%.2f MB)", path, size_mb))
-    } else {
-      cli::cli_alert_danger(sprintf("✗ Missing: %s", path))
-      verification_results$all_ok <- FALSE
-    }
-  }
-  
-  report_lines <- c(report_lines, 
-                   "## 1. File Presence",
-                   "",
-                   "| File | Status | Size |",
-                   "|------|--------|------|")
-  
-  for (name in names(file_check_results)) {
-    path <- artifacts_to_check[[name]]
-    if (file_check_results[[name]]) {
-      size_mb <- file.info(path)$size / (1024^2)
-      report_lines <- c(report_lines,
-                       sprintf("| %s | ✓ Present | %.2f MB |", basename(path), size_mb))
-    } else {
-      report_lines <- c(report_lines,
-                       sprintf("| %s | ✗ Missing | - |", basename(path)))
-    }
-  }
-  
-  # --- Check 2: Schema Validation ---
-  cli::cli_h2("2. Schema Validation")
-  report_lines <- c(report_lines, "", "## 2. Schema Validation", "")
-  
-  if (file.exists(paths$basic_anon) && file.exists(paths$dictionary)) {
-    basic_df <- read_csv(paths$basic_anon, show_col_types = FALSE)
-    dict_df <- read_csv(paths$dictionary, show_col_types = FALSE)
-    
-    schema_match <- identical(sort(names(basic_df)), sort(dict_df$column_name))
-    
-    if (schema_match) {
-      cli::cli_alert_success("✓ Dictionary schema matches anonymized data")
-      report_lines <- c(report_lines, "- ✓ Dictionary schema matches anonymized data")
-      report_lines <- c(report_lines, sprintf("- Column count: %d", ncol(basic_df)))
-    } else {
-      cli::cli_alert_danger("✗ Schema mismatch between dictionary and data")
-      verification_results$all_ok <- FALSE
-      
-      # Detailed mismatch reporting
-      in_data_not_dict <- setdiff(names(basic_df), dict_df$column_name)
-      in_dict_not_data <- setdiff(dict_df$column_name, names(basic_df))
-      
-      report_lines <- c(report_lines, "- ✗ Schema mismatch detected:")
-      if (length(in_data_not_dict) > 0) {
-        report_lines <- c(report_lines, 
-                         sprintf("  - Columns in data but not dictionary: %s", 
-                                paste(in_data_not_dict, collapse = ", ")))
-      }
-      if (length(in_dict_not_data) > 0) {
-        report_lines <- c(report_lines,
-                         sprintf("  - Columns in dictionary but not data: %s",
-                                paste(in_dict_not_data, collapse = ", ")))
-      }
-    }
-  } else {
-    cli::cli_alert_warning("⚠ Cannot validate schema (files missing)")
-    report_lines <- c(report_lines, "- ⚠ Cannot validate schema (required files missing)")
-  }
-  
-  # --- Check 3: Data Integrity ---
-  cli::cli_h2("3. Data Integrity Check")
-  report_lines <- c(report_lines, "", "## 3. Data Integrity", "")
-  
-  if (file.exists(paths$prelim_classified)) {
-    prelim_df <- read_csv(paths$prelim_classified, show_col_types = FALSE)
-    
-    # Find classification column (handle both possible names)
-    class_cols <- c("final_category_appendix_j", "stakeholder_category")
-    class_col <- intersect(class_cols, names(prelim_df))[1]
-    
-    if (!is.na(class_col)) {
-      na_count <- sum(is.na(prelim_df[[class_col]]))
-      total_rows <- nrow(prelim_df)
-      
-      if (na_count == 0) {
-        cli::cli_alert_success(sprintf("✓ No NA values in %s column (%d rows)", 
-                                      class_col, total_rows))
-        report_lines <- c(report_lines,
-                         sprintf("- ✓ Classification column '%s' complete (%d rows, 0 NAs)",
-                                class_col, total_rows))
-      } else {
-        cli::cli_alert_danger(sprintf("✗ Found %d NA values in %s column", 
-                                     na_count, class_col))
-        verification_results$all_ok <- FALSE
-        report_lines <- c(report_lines,
-                         sprintf("- ✗ Classification column '%s' has %d NAs (%.1f%%)",
-                                class_col, na_count, 100 * na_count / total_rows))
-      }
-      
-      # Additional integrity checks
-      unique_categories <- unique(prelim_df[[class_col]])
-      report_lines <- c(report_lines,
-                       sprintf("- Unique categories: %d", length(unique_categories)))
-      
-    } else {
-      cli::cli_alert_warning("⚠ Classification column not found")
-      report_lines <- c(report_lines, "- ⚠ Classification column not found in data")
-    }
-  }
-  
-  # --- Check 4: Generate Checksums ---
-  cli::cli_h2("4. Checksum Generation (SHA-256)")
-  report_lines <- c(report_lines, "", "## 4. File Checksums (SHA-256)", "")
-  
-  checksum_data <- tibble::tibble(
-    file = character(),
-    sha256 = character(),
-    size_bytes = numeric(),
-    modified = character()
-  )
-  
-  for (name in names(artifacts_to_check)) {
-    path <- artifacts_to_check[[name]]
-    if (file.exists(path)) {
-      sha <- digest::digest(file = path, algo = "sha256")
-      info <- file.info(path)
-      
-      checksum_data <- checksum_data %>%
-        add_row(
-          file = basename(path),
-          sha256 = sha,
-          size_bytes = info$size,
-          modified = format(info$mtime, "%Y-%m-%d %H:%M:%S")
-        )
-      
-      if (DEBUG) {
-        cli::cli_text(sprintf("  %s: %s", basename(path), substr(sha, 1, 12)))
-      }
-    }
-  }
-  
-  # Save checksums
-  write_csv(checksum_data, paths$checksums)
-  cli::cli_alert_success(sprintf("Checksums saved to %s", paths$checksums))
-  
-  # Add to report
-  report_lines <- c(report_lines, "", "```")
-  for (i in seq_len(nrow(checksum_data))) {
-    report_lines <- c(report_lines,
-                     sprintf("%s: %s", 
-                            checksum_data$file[i], 
-                            checksum_data$sha256[i]))
-  }
-  report_lines <- c(report_lines, "```", "")
-  
-  # --- Final Summary ---
-  cli::cli_h2("Verification Summary")
-  
-  if (verification_results$all_ok) {
-    cli::cli_alert_success("✅ All verification checks PASSED")
-    report_lines <- c(report_lines, 
-                     "## Summary", 
-                     "", 
-                     "**Result: ✅ PASSED** - All verification checks completed successfully.")
-  } else {
-    cli::cli_alert_danger("❌ Verification FAILED - Issues detected")
-    report_lines <- c(report_lines,
-                     "## Summary",
-                     "",
-                     "**Result: ❌ FAILED** - One or more verification checks failed.")
-  }
-  
-  # Write verification report
-  writeLines(report_lines, paths$verification)
-  cli::cli_alert_info(sprintf("Detailed report saved to %s", paths$verification))
-  
-  # Return status
-  if (!verification_results$all_ok) {
-    stop("Pipeline verification failed. Check the verification report for details.")
-  }
-  
-  invisible(verification_results)
-}
-
-# Run verification if requested
 if (VERIFY) {
-  verify_results <- verify_outputs(paths, WITH_ANALYSIS)
+  pipeline_stage <- "Verification"
+  cli::cli_h1("Running Quality Verification")
+  
+  quality_script <- "R/99_quality_checks.R"
+  
+  if (file.exists(quality_script)) {
+    # Execute the quality checks script
+    cli::cli_alert_info("Delegating to quality checks script...")
+    
+    tryCatch({
+      # Create environment for quality check execution
+      qa_env <- new.env(parent = .GlobalEnv)
+      
+      # Pass configuration to QA environment
+      qa_env$PATHS <- PATHS
+      qa_env$STANDARD_COLUMNS <- STANDARD_COLUMNS
+      qa_env$QUALITY_PARAMS <- QUALITY_PARAMS
+      qa_env$DEPRECATED_PATHS <- if (exists("DEPRECATED_PATHS")) DEPRECATED_PATHS else character(0)
+      qa_env$PRIVACY_COLUMNS <- if (exists("PRIVACY_COLUMNS")) PRIVACY_COLUMNS else character(0)
+      
+      # Source quality checks
+      source(quality_script, local = qa_env)
+      
+      # Run the quality checks function
+      if (exists("run_quality_checks", envir = qa_env, mode = "function")) {
+        qa_results <- qa_env$run_quality_checks(verbose = !DEBUG, save_report = TRUE)
+        
+        # Display summary
+        if (qa_results$overall_status == "PASSED") {
+          cli::cli_alert_success("✅ All quality checks PASSED")
+        } else if (qa_results$overall_status == "PARTIAL") {
+          cli::cli_alert_warning("⚠️ Quality checks PARTIALLY passed")
+          cli::cli_text("See ", PATHS$quality_assurance, " for details")
+        } else {
+          cli::cli_alert_danger("❌ Quality checks FAILED")
+          stop("Pipeline verification failed. Check ", PATHS$quality_assurance, " for details.")
+        }
+      } else {
+        cli::cli_alert_warning("Quality check function not found in script")
+      }
+      
+    }, error = function(e) {
+      cli::cli_alert_danger("Quality verification failed")
+      stop(sprintf("Error running quality checks: %s", e$message))
+    })
+    
+  } else {
+    cli::cli_alert_warning(sprintf("Quality checks script not found: %s", quality_script))
+    cli::cli_alert_info("Running basic file existence checks instead...")
+    
+    # Fallback: Basic file existence check using central config
+    core_files <- c(PATHS$basic_anon, PATHS$preliminary_classified, 
+                   PATHS$classification_template, PATHS$dictionary)
+    
+    if (WITH_ANALYSIS) {
+      core_files <- c(core_files, PATHS$final_1307)
+    }
+    
+    missing_files <- core_files[!file.exists(core_files)]
+    
+    if (length(missing_files) > 0) {
+      cli::cli_alert_danger(sprintf("Missing %d expected output file(s):", length(missing_files)))
+      for (f in missing_files) {
+        cli::cli_text(sprintf("  - %s", f))
+      }
+      stop("Pipeline verification failed due to missing outputs.")
+    } else {
+      cli::cli_alert_success("Basic file verification passed")
+    }
+  }
+} else {
+  cli::cli_alert_info("Verification skipped (use --verify to enable)")
 }
 
 # =============================================================================
-# 11. FINAL SUCCESS MESSAGE
+# 13. FINAL SUCCESS MESSAGE
 # =============================================================================
 
 cli::cli_h1("✅ Pipeline Completed Successfully")
@@ -741,22 +647,41 @@ final_summary <- c(
   sprintf("Total execution time: %.1f minutes", total_time),
   sprintf("Scripts executed: %d", 
          length(scripts_base) + ifelse(WITH_ANALYSIS, length(scripts_analysis), 0)),
-  sprintf("Artifacts generated: %d", 
-         sum(file.exists(unlist(paths)))),
-  sprintf("Verification: %s", ifelse(VERIFY, "PASSED", "SKIPPED"))
+  sprintf("Verification: %s", 
+         ifelse(VERIFY, 
+                ifelse(exists("qa_results"), qa_results$overall_status, "BASIC"), 
+                "SKIPPED"))
 )
 
 for (line in final_summary) {
   cli::cli_alert_success(line)
 }
 
+# Count actual artifacts created
+artifact_count <- 0
+for (path_name in names(PATHS)) {
+  if (!is.null(PATHS[[path_name]]) && file.exists(PATHS[[path_name]])) {
+    artifact_count <- artifact_count + 1
+  }
+}
+cli::cli_alert_success(sprintf("Artifacts generated: %d", artifact_count))
+
 # Provide next steps
 cli::cli_h2("Next Steps")
 if (!WITH_ANALYSIS) {
   cli::cli_alert_info("Run with --with-analysis flag to generate full analysis outputs")
 }
-cli::cli_alert_info("Check docs/verification_report.md for detailed validation results")
-cli::cli_alert_info("Review docs/checksums.txt for file integrity verification")
+
+# Point to reports using central config paths
+if (!is.null(PATHS$verification_report) && file.exists(PATHS$verification_report)) {
+  cli::cli_alert_info(paste("Check", PATHS$verification_report, "for detailed validation results"))
+}
+if (!is.null(PATHS$checksums) && file.exists(PATHS$checksums)) {
+  cli::cli_alert_info(paste("Review", PATHS$checksums, "for file integrity verification"))
+}
+if (!is.null(PATHS$quality_assurance) && file.exists(PATHS$quality_assurance)) {
+  cli::cli_alert_info(paste("See", PATHS$quality_assurance, "for comprehensive quality report"))
+}
 
 # Clean exit
 quit(save = "no", status = 0, runLast = FALSE)
