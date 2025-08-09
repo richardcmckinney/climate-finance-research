@@ -4,12 +4,12 @@ if (!"methods" %in% loadedNamespaces()) library(methods)
 if (!exists(".local", inherits = TRUE)) .local <- function(...) NULL
 
 # 01_anonymize_data.R — Pure anonymization with data cleaning
+# Version 2.0 - Now uses central configuration
 # - Drops telemetry/PII columns by name pattern
 # - Cleans core metadata columns (Progress, dates)
 # - Scrubs residual PII from free‑text fields
 # - Preserves `respondent_id` exactly (for stable joins)
 # - Writes: basic anonymized CSV and data dictionary
-# - NO CLASSIFICATION LOGIC (moved to 02_classify_stakeholders.R)
 
 suppressPackageStartupMessages({
   if (!"methods" %in% loadedNamespaces()) library(methods)
@@ -22,30 +22,23 @@ suppressPackageStartupMessages({
   library(cli)
 })
 
+# SOURCE CENTRAL CONFIGURATION
+source("R/00_config.R")
+check_deprecated()  # Check for old files
+set_stage("Anonymization")  # Set pipeline stage
+
 `%||%` <- function(a, b) if (is.null(a)) b else a
 
 # ------------------------- Configuration -------------------------
+# Now uses PATHS from central config
 config <- list(
-  pii_patterns = c(
-    "(?i)ip[_ ]?address|^IPAddress$",
-    "(?i)email|e[-_ ]?mail|RecipientEmail",
-    "(?i)first[_ ]?name|last[_ ]?name|full[_ ]?name|^name$",
-    "(?i)recipient|Recipient|ExternalDataReference|external.*reference",
-    "(?i)latitude|longitude|LocationLatitude|LocationLongitude",
-    "(?i)\\bhq_?address|address[_ ]?line|street|city|^state$|zip|postal",
-    "(?i)phone|mobile|cell|tel|fax",
-    "(?i)website|url|^link$",
-    "^ResponseId$|^StartDate$|^EndDate$|^RecordedDate$",
-    "(?i)birth.*date|dob|date.*birth",
-    "(?i)ssn|social.*security",
-    "(?i)passport|driver.*license|license.*number"
-  ),
+  pii_patterns = PRIVACY_COLUMNS,  # Use central privacy patterns
   output_paths = list(
-    basic       = "data/survey_responses_anonymized_basic.csv",
-    dictionary  = "data/data_dictionary.csv"
+    basic = PATHS$basic_anon,      # Use path from central config
+    dictionary = PATHS$dictionary   # Use path from central config
   ),
   hash_length = 10,
-  min_progress = 10  # For data cleaning
+  min_progress = QUALITY_PARAMS$min_progress  # Use central quality params
 )
 
 # ------------------------- Helpers -------------------------
@@ -70,7 +63,6 @@ safe_month <- function(x) {
   if (is.null(x) || length(x) == 0) return(character(0))
   x <- as.character(x)
   
-  # Try multiple date formats
   date_formats <- c(
     "%Y-%m-%d %H:%M:%S",
     "%Y-%m-%d %H:%M",
@@ -90,7 +82,6 @@ safe_month <- function(x) {
     parsed[!is.na(attempt)] <- attempt[!is.na(attempt)]
   }
   
-  # For any remaining NAs, try lubridate
   if (anyNA(parsed)) {
     na_idx <- which(is.na(parsed))
     parsed[na_idx] <- suppressWarnings(lubridate::parse_date_time(
@@ -116,15 +107,15 @@ hash_id <- function(x, pref) {
 scrub_text <- function(x) {
   if (!is.character(x)) return(x)
   
-  # Email addresses - more comprehensive pattern
+  # Email addresses
   x <- gsub("(?i)[A-Za-z0-9._%+\\-]+@[A-Za-z0-9.\\-]+\\.[A-Za-z]{2,}", "[REDACTED_EMAIL]", x, perl = TRUE)
   
-  # Phone numbers - multiple formats
+  # Phone numbers
   x <- gsub("\\+?[1-9]\\d{0,3}[\\s\\-\\.]?\\(?\\d{1,4}\\)?[\\s\\-\\.]?\\d{1,4}[\\s\\-\\.]?\\d{1,9}", "[REDACTED_PHONE]", x, perl = TRUE)
   x <- gsub("\\(?\\d{3}\\)?[\\s\\-\\.]?\\d{3}[\\s\\-\\.]?\\d{4}", "[REDACTED_PHONE]", x, perl = TRUE)
   x <- gsub("\\b\\d{3,4}[\\s\\-\\.]\\d{3,4}[\\s\\-\\.]\\d{3,4}\\b", "[REDACTED_PHONE]", x, perl = TRUE)
   
-  # URLs - comprehensive pattern
+  # URLs
   x <- gsub("(?i)(https?://[^\\s]+|ftp://[^\\s]+|www\\.[A-Za-z0-9\\-]+\\.[A-Za-z]{2,}[^\\s]*)", "[REDACTED_URL]", x, perl = TRUE)
   
   # Social media handles
@@ -144,9 +135,9 @@ if (!dir.exists("data_raw")) {
   cli::cli_abort("Directory 'data_raw' not found. Please ensure raw data directory exists.")
 }
 
-# Create output directories
+# Create output directories using safe_path from config
 for (path in config$output_paths) {
-  dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
+  safe_path(path)  # This creates directories as needed
 }
 
 # ------------------------- Load data -------------------------
@@ -173,7 +164,7 @@ if (nrow(raw) == 0) {
 
 cli::cli_inform(paste("Loaded", nrow(raw), "rows and", ncol(raw), "columns"))
 
-# Column detection
+# Column detection using STANDARD_COLUMNS where possible
 col_response_id <- find_col(raw, c("ResponseId", "_recordId", "Response ID", "response_id"), 
                            pattern = "^response[_ ]?id$|^_recordid$")
 col_start  <- find_col(raw, c("StartDate", "startDate", "Start Date", "start_date"), 
@@ -197,7 +188,7 @@ resp_id <- if (!is.na(col_response_id)) {
 # Create anonymized dataset with initial transforms
 an_basic <- raw %>%
   mutate(
-    respondent_id = hash_id(resp_id, "RESP"),
+    !!STANDARD_COLUMNS$respondent_id := hash_id(resp_id, "RESP"),  # Use standard column name
     across(.cols = any_of(c(col_start, col_end, col_record)), 
            .fns = ~ safe_month(.x), 
            .names = "{.col}_month")
@@ -224,16 +215,27 @@ if (!is.na(col_progress)) {
     an_basic[[col_progress]][is.na(an_basic[[col_progress]])] <- 0
   }
   
-  # Ensure Progress column is included and cleaned
-  if (!"Progress" %in% names(an_basic) && col_progress != "Progress") {
-    an_basic$Progress <- an_basic[[col_progress]]
+  # Ensure Progress column uses standard name
+  if (col_progress != STANDARD_COLUMNS$progress) {
+    an_basic[[STANDARD_COLUMNS$progress]] <- an_basic[[col_progress]]
   }
 } else {
   cli::cli_warn("Progress column not found - downstream scripts may need adjustment")
 }
 
-# Compile PII regex pattern
-pii_regex <- paste(config$pii_patterns, collapse = "|")
+# Build PII regex pattern from central config
+pii_patterns_extra <- c(
+  "(?i)ip[_ ]?address|^IPAddress$",
+  "(?i)recipient|Recipient|ExternalDataReference|external.*reference",
+  "(?i)\\bhq_?address|address[_ ]?line|street|city|^state$|zip|postal",
+  "(?i)website|url|^link$",
+  "^ResponseId$|^StartDate$|^EndDate$|^RecordedDate$",
+  "(?i)birth.*date|dob|date.*birth",
+  "(?i)ssn|social.*security",
+  "(?i)passport|driver.*license|license.*number"
+)
+
+pii_regex <- paste(c(PRIVACY_COLUMNS, pii_patterns_extra), collapse = "|")
 
 # Remove PII columns
 cols_to_remove <- grep(pii_regex, names(an_basic), ignore.case = TRUE, value = TRUE)
@@ -246,17 +248,20 @@ if (length(cols_to_remove) > 0) {
 
 # Ensure respondent_id is first
 an_basic <- an_basic %>%
-  relocate(respondent_id, .before = 1)
+  relocate(!!STANDARD_COLUMNS$respondent_id, .before = 1)
 
 # Scrub PII in character columns EXCEPT respondent_id
 char_cols <- names(an_basic)[vapply(an_basic, is.character, logical(1))]
-char_cols <- setdiff(char_cols, "respondent_id")
+char_cols <- setdiff(char_cols, STANDARD_COLUMNS$respondent_id)
 
 if (length(char_cols) > 0) {
   cli::cli_inform(paste("Scrubbing PII from", length(char_cols), "text columns"))
   an_basic <- an_basic %>% 
     mutate(across(all_of(char_cols), scrub_text))
 }
+
+# Check for privacy violations before saving
+check_privacy_violations(an_basic, stop_on_violation = FALSE)
 
 # Save basic anonymized file
 cli::cli_inform("Saving basic anonymized data...")
@@ -291,20 +296,20 @@ if (nrow(an_basic) != nrow(raw)) {
   cli::cli_warn(paste("Row count changed:", nrow(raw), "->", nrow(an_basic)))
 }
 
-if (any(duplicated(an_basic$respondent_id))) {
+if (any(duplicated(an_basic[[STANDARD_COLUMNS$respondent_id]]))) {
   cli::cli_warn("Duplicate respondent IDs detected!")
 }
 
 # Progress statistics if available
-if ("Progress" %in% names(an_basic)) {
+if (STANDARD_COLUMNS$progress %in% names(an_basic)) {
   progress_stats <- an_basic %>%
     summarise(
-      mean_progress = mean(Progress, na.rm = TRUE),
-      median_progress = median(Progress, na.rm = TRUE),
-      min_progress = min(Progress, na.rm = TRUE),
-      max_progress = max(Progress, na.rm = TRUE),
-      n_complete = sum(Progress >= 100, na.rm = TRUE),
-      n_sufficient = sum(Progress >= config$min_progress, na.rm = TRUE)
+      mean_progress = mean(.data[[STANDARD_COLUMNS$progress]], na.rm = TRUE),
+      median_progress = median(.data[[STANDARD_COLUMNS$progress]], na.rm = TRUE),
+      min_progress = min(.data[[STANDARD_COLUMNS$progress]], na.rm = TRUE),
+      max_progress = max(.data[[STANDARD_COLUMNS$progress]], na.rm = TRUE),
+      n_complete = sum(.data[[STANDARD_COLUMNS$progress]] >= 100, na.rm = TRUE),
+      n_sufficient = sum(.data[[STANDARD_COLUMNS$progress]] >= config$min_progress, na.rm = TRUE)
     )
   
   cli::cli_inform("Progress statistics:")
