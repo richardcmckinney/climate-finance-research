@@ -1,6 +1,44 @@
 # ===========================================
 # Climate Finance Research Pipeline .gitignore
-# Version 4.0 - Comprehensive
+# Version 4.0 - Comprehensive with Documentation
+# ===========================================
+#
+# PURPOSE:
+# This .gitignore file protects sensitive data and maintains repository hygiene
+# for the Climate Finance Research Pipeline. It serves multiple critical functions:
+#
+# 1. DATA PRIVACY PROTECTION:
+#    - Prevents accidental commits of raw survey data containing PII
+#    - Blocks files with email addresses, names, organization identifiers
+#    - Excludes geographic data that could identify respondents
+#
+# 2. REPRODUCIBILITY ASSURANCE:
+#    - Keeps only anonymized, processed datasets in version control
+#    - Maintains clear separation between raw and public data
+#    - Preserves only verified, privacy-compliant outputs
+#
+# 3. REPOSITORY CLEANLINESS:
+#    - Excludes temporary files, logs, and system-specific files
+#    - Prevents IDE configurations from affecting other developers
+#    - Blocks large binary files that shouldn't be versioned
+#
+# 4. COMPLIANCE WITH ETHICS:
+#    - Enforces Oxford CUREC ethics approval requirements
+#    - Ensures GDPR compliance by excluding identifiable data
+#    - Maintains audit trail of what data is public vs. private
+#
+# CRITICAL NOTES:
+# - Raw data should NEVER be committed, even accidentally
+# - Only 4 public CSV files are allowed in the data/ directory
+# - Question Q2.2 files must always be excluded (contains locations)
+# - Review all outputs before committing to ensure anonymization
+#
+# HOW TO USE:
+# 1. This file is automatically applied by Git
+# 2. Use 'git status' to verify files are properly ignored
+# 3. Use 'git add -f' to force-add files if absolutely necessary
+# 4. Run 'R/99_quality_checks.R' to validate privacy compliance
+#
 # ===========================================
 
 # ---------------------------------------------
@@ -19,6 +57,7 @@ rsconnect/
 
 # ---------------------------------------------
 # renv Package Management
+# Purpose: Exclude local package libraries while keeping lock file
 # ---------------------------------------------
 renv/library/
 renv/staging/
@@ -33,6 +72,7 @@ renv/source/
 
 # ---------------------------------------------
 # Raw Data - CRITICAL: Never commit raw survey data
+# These files contain PII and violate ethics approval if shared
 # ---------------------------------------------
 data_raw/
 raw_data/
@@ -46,6 +86,7 @@ original_*.csv
 
 # ---------------------------------------------
 # Deprecated Files - Should be deleted if found
+# Pipeline will warn if these exist
 # ---------------------------------------------
 data/climate_finance_survey_classified.csv
 data/climate_finance_survey_anonymized.csv
@@ -54,8 +95,9 @@ data/climate_finance_survey_anonymized.csv
 
 # ---------------------------------------------
 # PII and Sensitive Data Patterns
+# Any file matching these patterns likely contains personal information
 # ---------------------------------------------
-# Question 2.2 and related files
+# Question 2.2 and related files (contains geographic coordinates)
 *Q2.2*
 *Q2_2*
 *q2.2*
@@ -95,6 +137,7 @@ data/climate_finance_survey_anonymized.csv
 
 # ---------------------------------------------
 # Output Files - Selective inclusion
+# Most outputs excluded until privacy-verified
 # ---------------------------------------------
 # Block most outputs by default
 output/*.csv
@@ -112,6 +155,7 @@ output/models/*.rds
 
 # ---------------------------------------------
 # Figures - Review before committing
+# Figures may inadvertently reveal geographic patterns
 # ---------------------------------------------
 figures/*.png
 figures/*.pdf
@@ -132,11 +176,12 @@ figures/*country*
 
 # ---------------------------------------------
 # Data Files - Selective inclusion
+# Only 4 CSV files are public per ethics approval
 # ---------------------------------------------
 # Block all CSV by default
 data/*.csv
 
-# But explicitly allow public artifacts
+# But explicitly allow public artifacts (N=1,563 and N=1,307)
 !data/survey_responses_anonymized_basic.csv
 !data/survey_responses_anonymized_preliminary.csv
 !data/climate_finance_survey_final_1307.csv
@@ -159,6 +204,7 @@ docs/working/
 
 # ---------------------------------------------
 # Temporary and Backup Files
+# These can accumulate and may contain sensitive data
 # ---------------------------------------------
 *.tmp
 *.temp
@@ -174,6 +220,7 @@ docs/working/
 
 # ---------------------------------------------
 # Log Files (may contain sensitive info)
+# Logs might include data samples or error messages with PII
 # ---------------------------------------------
 logs/
 *.log
@@ -185,6 +232,7 @@ trace_*.txt
 
 # ---------------------------------------------
 # R Session and Checkpoint Files
+# These may contain workspace data including sensitive variables
 # ---------------------------------------------
 .RData
 *.rda
@@ -225,6 +273,7 @@ $RECYCLE.BIN/
 
 # ---------------------------------------------
 # IDE and Editor Files
+# Team members may use different editors
 # ---------------------------------------------
 # Visual Studio Code
 .vscode/
@@ -259,6 +308,7 @@ auto-save-list
 
 # ---------------------------------------------
 # Python (if mixed environment)
+# Some team members may use Python for supplementary analysis
 # ---------------------------------------------
 __pycache__/
 *.py[cod]
@@ -285,6 +335,7 @@ pip-delete-this-directory.txt
 
 # ---------------------------------------------
 # Database Files
+# May contain raw survey data
 # ---------------------------------------------
 *.sql
 *.sqlite
@@ -295,6 +346,7 @@ pip-delete-this-directory.txt
 
 # ---------------------------------------------
 # Credentials and Secrets - NEVER commit
+# Even though survey is anonymous, protect any API keys
 # ---------------------------------------------
 *.key
 *.pem
@@ -314,6 +366,7 @@ auth.json
 
 # ---------------------------------------------
 # Personal Notes and Working Files
+# Researchers' personal notes may contain observations about data
 # ---------------------------------------------
 notes/
 personal/
@@ -340,6 +393,7 @@ my_notes/
 
 # ---------------------------------------------
 # CRITICAL FILES TO KEEP - Never ignore these
+# These files are essential for pipeline operation
 # ---------------------------------------------
 !R/00_config.R
 !R/appendix_j_config.R
@@ -357,4 +411,6 @@ my_notes/
 
 # ---------------------------------------------
 # End of .gitignore
+# Remember: When in doubt, exclude it!
+# Data privacy > Convenience
 # ---------------------------------------------
