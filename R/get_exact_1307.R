@@ -20,14 +20,19 @@ if (!"ResponseId" %in% names(df)) df$ResponseId <- seq_len(nrow(df))
 if (!"Progress"   %in% names(df)) stop("Progress column missing.")
 df$Progress <- suppressWarnings(as.numeric(df$Progress))
 
-# Eligibility: consent (if present) + Progress >= 10; drop the straight-liner
+# Eligibility: consent (if present) + Progress >= 10
 consent_cols <- c("consent","Consent","Q_consent","Q0_consent")
 cc <- consent_cols[consent_cols %in% names(df)]
 if (length(cc) >= 1) {
-  consent_vals <- c("consent","Consent","Yes","I consent","i consent","Consented","1",1,TRUE,"TRUE")
+  # FIXED: Ensure character comparison for consistency
+  df[[cc[1]]] <- as.character(df[[cc[1]]])
+  consent_vals <- c("consent","Consent","Yes","I consent","i consent","Consented","1","TRUE")
   df <- df %>% filter(.data[[cc[1]]] %in% consent_vals | is.na(.data[[cc[1]]]))
 }
 df <- df %>% filter(Progress >= 10)
+
+# DOCUMENTED: Exclude straight-line respondent identified during quality control
+# This respondent answered all questions with the same response pattern
 df <- df %>% filter(ResponseId != "R_bBAyiwWo1sotqM6")
 
 # Target distribution (Appendix J, total = 1307)

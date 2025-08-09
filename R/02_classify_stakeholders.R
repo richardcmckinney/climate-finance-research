@@ -70,8 +70,9 @@ classify_stakeholder <- function(raw_text, other_text) {
   # Priority order classification based on Appendix J
   
   # 1. Entrepreneur in Climate Technology (highest priority for climate-specific)
-  # Expanded to catch more climate-related entrepreneurs
-  if (str_detect(combined, "(?=.*(entrepreneur|founder|co[- ]?founder|ceo|cto|startup|venture\\s*builder|launching|started)).*(?=.*(climate|clean|green|sustain|carbon|emission|renewable|solar|wind|battery|storage|hydrogen|bio|ccus|adapt|energy|electric|environmental|esg))")) {
+  # FIXED: Removed broken lookahead pattern, now uses proper regex matching
+  if (str_detect(combined, "(entrepreneur|founder|co[- ]?founder|ceo|cto|startup|venture\\s*builder|launching|started).*(climate|clean|green|sustain|carbon|emission|renewable|solar|wind|battery|storage|hydrogen|bio|ccus|adapt|energy|electric|environmental|esg)") ||
+      str_detect(combined, "(climate|clean|green|sustain|carbon|emission|renewable|solar|wind|battery|storage|hydrogen|bio|ccus|adapt|energy|electric|environmental|esg).*(entrepreneur|founder|co[- ]?founder|ceo|cto|startup|venture\\s*builder|launching|started)")) {
     return("Entrepreneur in Climate Technology")
   }
   
