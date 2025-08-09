@@ -1,6 +1,6 @@
 # ============================================
 # Initialize renv for Climate Finance Pipeline
-# Version 4.0 - With Comprehensive Documentation
+# Version 4.0 - With Comprehensive Documentation (FIXED)
 # ============================================
 #
 # PURPOSE OF renv AND THIS SCRIPT:
@@ -62,16 +62,16 @@ cat("============================================\n\n")
 # Step 1: Install renv if not already installed
 cat("Step 1: Checking for renv package...\n")
 if (!requireNamespace("renv", quietly = TRUE)) {
-  cat("  → Installing renv package manager...\n")
+  cat("  --> Installing renv package manager...\n")
   install.packages("renv")
-  cat("  ✓ renv installed successfully\n")
+  cat("  [OK] renv installed successfully\n")
 } else {
-  cat("  ✓ renv already installed\n")
+  cat("  [OK] renv already installed\n")
 }
 
 # Step 2: Initialize renv in the project
 cat("\nStep 2: Initializing renv project environment...\n")
-cat("  → This creates renv/ directory and renv.lock file\n")
+cat("  --> This creates renv/ directory and renv.lock file\n")
 
 renv::init(
   settings = list(
@@ -89,7 +89,7 @@ renv::init(
     use.cache = TRUE
   )
 )
-cat("  ✓ renv initialized\n")
+cat("  [OK] renv initialized\n")
 
 # Step 3: Define all required packages
 cat("\nStep 3: Defining package requirements...\n")
@@ -137,7 +137,7 @@ core_packages <- c(
   "writexl"        # Write Excel files for sharing
 )
 
-cat("  → Total packages to install:", length(core_packages), "\n")
+cat("  --> Total packages to install:", length(core_packages), "\n")
 
 # Step 4: Install all packages
 cat("\nStep 4: Installing required packages...\n")
@@ -155,11 +155,11 @@ for (pkg in core_packages) {
       install.packages(pkg, quiet = TRUE)
       installed_count <- installed_count + 1
     }, error = function(e) {
-      cat(sprintf("    ⚠ Failed to install %s: %s\n", pkg, e$message))
+      cat(sprintf("    [WARNING] Failed to install %s: %s\n", pkg, e$message))
       failed_packages <- c(failed_packages, pkg)
     })
   } else {
-    cat(sprintf("  ✓ %s already installed (v%s)\n", 
+    cat(sprintf("  [OK] %s already installed (v%s)\n", 
                 pkg, as.character(packageVersion(pkg))))
     installed_count <- installed_count + 1
   }
@@ -167,7 +167,7 @@ for (pkg in core_packages) {
 
 # Report installation results
 if (length(failed_packages) > 0) {
-  cat("\n⚠ WARNING: Some packages failed to install:\n")
+  cat("\n[WARNING] Some packages failed to install:\n")
   for (pkg in failed_packages) {
     cat(sprintf("  - %s\n", pkg))
   }
@@ -178,11 +178,11 @@ if (length(failed_packages) > 0) {
 cat("\nStep 5: Loading packages for snapshot...\n")
 invisible(lapply(setdiff(core_packages, failed_packages), 
                 library, character.only = TRUE))
-cat("  ✓ Packages loaded\n")
+cat("  [OK] Packages loaded\n")
 
 # Step 6: Create snapshot
 cat("\nStep 6: Creating renv.lock snapshot file...\n")
-cat("  → This records exact package versions\n")
+cat("  --> This records exact package versions\n")
 
 renv::snapshot(
   type = "explicit",
@@ -194,15 +194,15 @@ renv::snapshot(
 cat("\nStep 7: Verifying snapshot creation...\n")
 
 if (file.exists("renv.lock")) {
-  cat("  ✅ SUCCESS: renv.lock file created!\n")
-  cat("  📍 Location: ./renv.lock\n")
+  cat("  [SUCCESS] renv.lock file created!\n")
+  cat("  [LOCATION] ./renv.lock\n")
   
   # Show summary of what was captured
   lockfile <- renv::lockfile_read("renv.lock")
-  cat(sprintf("\n  📦 Total packages locked: %d\n", length(lockfile$Packages)))
+  cat(sprintf("\n  [PACKAGES] Total packages locked: %d\n", length(lockfile$Packages)))
   
   # Display key package versions for verification
-  cat("\n  📋 Key package versions captured:\n")
+  cat("\n  [VERSIONS] Key package versions captured:\n")
   key_packages <- c("tidyverse", "dplyr", "ggplot2", "cli", 
                    "digest", "lubridate", "psych", "lavaan")
   
@@ -210,16 +210,16 @@ if (file.exists("renv.lock")) {
     if (pkg %in% names(lockfile$Packages)) {
       version <- lockfile$Packages[[pkg]]$Version
       source <- lockfile$Packages[[pkg]]$Source
-      cat(sprintf("     • %-12s v%-10s [%s]\n", pkg, version, source))
+      cat(sprintf("     - %-12s v%-10s [%s]\n", pkg, version, source))
     }
   }
   
   # Show R version information
-  cat(sprintf("\n  🔧 R version: %s\n", R.version.string))
-  cat(sprintf("  🔧 Platform: %s\n", R.version$platform))
+  cat(sprintf("\n  [R VERSION] %s\n", R.version.string))
+  cat(sprintf("  [PLATFORM] %s\n", R.version$platform))
   
 } else {
-  cat("\n❌ ERROR: renv.lock file was not created.\n")
+  cat("\n[ERROR] renv.lock file was not created.\n")
   cat("Please check for errors above.\n")
   stop("renv initialization failed")
 }
@@ -239,8 +239,8 @@ if (file.exists("renv/activate.R")) {
   
   # Optional: Show message confirming activation
   if (interactive()) {
-    cat("✓ renv activated - using project package library\\n")
-    cat("  Run renv::status() to check environment\\n")
+    cat("[OK] renv activated - using project package library\n")
+    cat("     Run renv::status() to check environment\n")
   }
 }
 
@@ -272,12 +272,13 @@ options(
 # }
 '
 
-if (!file.exists(".Rprofile") || 
-    readline("📝 .Rprofile exists. Overwrite? (y/n): ") == "y") {
+# Check if .Rprofile exists and handle accordingly
+if (!file.exists(".Rprofile")) {
   writeLines(rprofile_content, ".Rprofile")
-  cat("  ✓ Created .Rprofile for auto-activation\n")
+  cat("  [OK] Created .Rprofile for auto-activation\n")
 } else {
-  cat("  ℹ Kept existing .Rprofile\n")
+  cat("  [INFO] .Rprofile already exists\n")
+  cat("  --> To overwrite, delete existing .Rprofile and run this script again\n")
 }
 
 # Step 9: Generate helpful documentation
@@ -330,7 +331,7 @@ renv::status()
 ## Important Files
 
 - `renv.lock`: Package versions (commit this!)
-- `renv/`: Local library (don\'t commit - in .gitignore)
+- `renv/`: Local library (do not commit - in .gitignore)
 - `.Rprofile`: Auto-activates renv (commit this)
 
 ## Updating Packages
@@ -345,38 +346,45 @@ To update packages while maintaining reproducibility:
 '
 
 writeLines(readme_content, "renv_README.md")
-cat("  ✓ Created renv_README.md with instructions\n")
+cat("  [OK] Created renv_README.md with instructions\n")
 
 # Step 10: Final summary and instructions
-cat("\n" , strrep("=", 50), "\n")
-cat("🎉 SETUP COMPLETE!\n")
-cat(strrep("=", 50), "\n\n")
+cat("\n")
+cat(strrep("=", 50))
+cat("\n")
+cat("  SETUP COMPLETE!\n")
+cat(strrep("=", 50))
+cat("\n\n")
 
-cat("📊 Summary:\n")
-cat(sprintf("  • R version: %s\n", R.version.string))
-cat(sprintf("  • Platform: %s\n", R.version$platform))
-cat(sprintf("  • renv version: %s\n", packageVersion("renv")))
-cat(sprintf("  • Packages locked: %d\n", length(lockfile$Packages)))
-cat(sprintf("  • Lock file size: %.1f KB\n", file.size("renv.lock") / 1024))
+cat("SUMMARY:\n")
+cat(sprintf("  - R version: %s\n", R.version.string))
+cat(sprintf("  - Platform: %s\n", R.version$platform))
+cat(sprintf("  - renv version: %s\n", packageVersion("renv")))
 
-cat("\n📌 Next Steps:\n")
-cat("1. ✓ Commit these files to Git:\n")
-cat("     git add renv.lock .Rprofile\n")
+# Only show package count if lockfile exists
+if (exists("lockfile")) {
+  cat(sprintf("  - Packages locked: %d\n", length(lockfile$Packages)))
+  cat(sprintf("  - Lock file size: %.1f KB\n", file.size("renv.lock") / 1024))
+}
+
+cat("\nNEXT STEPS:\n")
+cat("1. Commit these files to Git:\n")
+cat("     git add renv.lock .Rprofile renv_README.md\n")
 cat("     git commit -m \"Add renv for reproducibility\"\n")
-cat("\n2. ✓ Team instructions:\n")
+cat("\n2. Team instructions:\n")
 cat("     After cloning, team members run: renv::restore()\n")
-cat("\n3. ✓ Verify setup:\n")
+cat("\n3. Verify setup:\n")
 cat("     Restart R, then run: renv::status()\n")
-cat("\n4. ✓ Future updates:\n")
+cat("\n4. Future updates:\n")
 cat("     After installing new packages: renv::snapshot()\n")
 
-cat("\n💡 Tips:\n")
-cat("  • renv.lock is human-readable JSON - you can review it\n")
-cat("  • Each project has isolated package versions\n")
-cat("  • Packages are cached globally to save space\n")
-cat("  • See renv_README.md for troubleshooting\n")
+cat("\nTIPS:\n")
+cat("  - renv.lock is human-readable JSON - you can review it\n")
+cat("  - Each project has isolated package versions\n")
+cat("  - Packages are cached globally to save space\n")
+cat("  - See renv_README.md for troubleshooting\n")
 
-cat("\n🔬 For reproducible science!\n")
+cat("\nFor reproducible science!\n")
 cat("Your analysis environment is now frozen in time.\n")
 cat("Anyone can recreate it exactly, even years from now.\n\n")
 
