@@ -5,138 +5,173 @@ if (!exists(".local", inherits = TRUE)) .local <- function(...) NULL
 
 # manual_classification_correction.R
 # Purpose: Create a manual reassignment template for hand corrections
-# Input : Looks for available classified data files using canonical paths
-# Output: output/manual_reassignment_template.csv
+# Version: 2.1 - Fully integrated with central configuration, robust error handling
+# Author: Richard McKinney
+# Date: 2025-08-08
+
+suppressPackageStartupMessages({
+  library(tidyverse)
+  library(cli)
+})
 
 # =============================================================================
 # LOAD CONFIGURATION
 # =============================================================================
-
-# Source the central configuration file
-if (file.exists("R/00_config.R")) {
-  source("R/00_config.R")
-} else if (file.exists("00_config.R")) {
-  source("00_config.R")
-} else {
-  stop("Configuration file not found. Please ensure R/00_config.R or 00_config.R exists.")
+# Source both configuration files for paths and helper functions
+if (!file.exists("R/00_config.R")) {
+  cli_abort("Central configuration not found at R/00_config.R")
 }
+source("R/00_config.R")
 
-# =============================================================================
-# LOAD LIBRARIES
-# =============================================================================
+if (!file.exists("R/appendix_j_config.R")) {
+  cli_abort("Appendix J configuration not found at R/appendix_j_config.R")
+}
+source("R/appendix_j_config.R")
 
-suppressPackageStartupMessages(library(tidyverse))
-
-# =============================================================================
-# SETUP OUTPUT DIRECTORY
-# =============================================================================
-
-dir.create("output", recursive = TRUE, showWarnings = FALSE)
+set_stage("Manual Template Creation")
 
 # =============================================================================
 # FIND INPUT FILE USING CANONICAL PATHS
 # =============================================================================
+cli_h1("Manual Classification Correction Template Generator")
 
-# Use canonical paths from configuration
-# Priority order: final_1307 > preliminary_classified > basic_anon
-input_files <- c(
-  PATHS$final_1307,               # "data/climate_finance_survey_final_1307.csv"
-  PATHS$preliminary_classified,   # "data/survey_responses_anonymized_preliminary.csv"
-  PATHS$basic_anon                # "data/survey_responses_anonymized_basic.csv"
+# Determine which stage of the pipeline to use for template creation
+# Priority: final_1307 > preliminary_classified > basic_anon
+input_path <- NULL
+input_stage <- NULL
+
+if (file.exists(PATHS$final_1307)) {
+  input_path <- PATHS$final_1307
+  input_stage <- "Final (N=1,307)"
+} else if (file.exists(PATHS$preliminary_classified)) {
+  input_path <- PATHS$preliminary_classified
+  input_stage <- "Preliminary Classified"
+} else if (file.exists(PATHS$basic_anon)) {
+  input_path <- PATHS$basic_anon
+  input_stage <- "Basic Anonymized"
+} else {
+  cli_abort(c(
+    "x" = "No input data found in the pipeline.",
+    "i" = "Run at least the anonymization stage first: Rscript R/01_anonymize_data.R",
+    "i" = "Looked for files in this order:",
+    " " = "1. {PATHS$final_1307}",
+    " " = "2. {PATHS$preliminary_classified}",
+    " " = "3. {PATHS$basic_anon}"
+  ))
+}
+
+cli_alert_info("Using {input_stage} data from: {.path {basename(input_path)}}")
+
+# =============================================================================
+# LOAD AND VALIDATE DATA
+# =============================================================================
+df <- read_csv(input_path, show_col_types = FALSE, progress = FALSE)
+cli_alert_success("Loaded {nrow(df)} rows and {ncol(df)} columns")
+
+# Privacy check (warning only for this utility script)
+privacy_ok <- check_privacy_violations(df, stop_on_violation = FALSE)
+if (!privacy_ok) {
+  cli_alert_warning("Privacy-sensitive columns detected. Template will exclude these.")
+}
+
+# =============================================================================
+# FIND KEY COLUMNS USING CENTRALIZED HELPERS
+# =============================================================================
+cli_h2("Identifying Key Columns")
+
+# Find ID column (required)
+id_candidates <- c(STANDARD_COLUMNS$respondent_id, "ResponseId", "response_id", "_recordId")
+id_col <- find_column(df, id_candidates)
+if (is.null(id_col)) {
+  cli_abort(c(
+    "x" = "No ID column found in the dataset.",
+    "i" = "Looked for: {paste(id_candidates, collapse = ', ')}"
+  ))
+}
+cli_alert_success("ID column: {.field {id_col}}")
+
+# Find role column (required)
+role_col <- tryCatch(
+  find_role_column(df),
+  error = function(e) {
+    cli_abort(c(
+      "x" = "No role/category column found in the dataset.",
+      "i" = e$message
+    ))
+  }
+)
+cli_alert_success("Role column: {.field {role_col}}")
+
+# Find progress column (optional)
+progress_col <- find_progress_column(df)
+if (!is.null(progress_col)) {
+  cli_alert_success("Progress column: {.field {progress_col}}")
+} else {
+  cli_alert_info("No progress column found (optional)")
+}
+
+# Find raw role columns for review context (optional)
+role_raw_candidates <- c(STANDARD_COLUMNS$role_raw, "Role_Raw", "Q2.1", "role_raw", "QID174")
+role_raw_col <- find_column(df, role_raw_candidates)
+if (!is.null(role_raw_col)) {
+  cli_alert_success("Raw role column: {.field {role_raw_col}}")
+}
+
+role_text_candidates <- c(STANDARD_COLUMNS$role_text, "Role_Other_Text", "Q2.1_12_TEXT", 
+                          "role_other", "QID174_12_TEXT")
+role_text_col <- find_column(df, role_text_candidates)
+if (!is.null(role_text_col)) {
+  cli_alert_success("Other text column: {.field {role_text_col}}")
+}
+
+# =============================================================================
+# CREATE MANUAL REVIEW TEMPLATE
+# =============================================================================
+cli_h2("Building Manual Review Template")
+
+# Start with core columns
+template <- tibble(
+  !!id_col := df[[id_col]],
+  Current_Category = df[[role_col]]
 )
 
-# Find first existing file
-infile <- NULL
-for (f in input_files) {
-  if (file.exists(f)) {
-    infile <- f
-    break
-  }
+# Add progress if available
+if (!is.null(progress_col)) {
+  template$Progress <- df[[progress_col]]
 }
 
-if (is.null(infile)) {
-  stop("No input file found. Looked for:\n  ", paste(input_files, collapse = "\n  "),
-       "\nPlease ensure pipeline stages have been run in order.")
+# Add raw role data if available (for context during review)
+if (!is.null(role_raw_col)) {
+  template$Role_Raw <- df[[role_raw_col]]
 }
 
-cat("Using input file: ", infile, "\n")
-
-# =============================================================================
-# LOAD AND PROCESS DATA
-# =============================================================================
-
-df <- read.csv(infile, stringsAsFactors = FALSE)
-
-# Check for privacy violations before proceeding
-tryCatch({
-  check_privacy_violations(df, stop_on_violation = FALSE)
-}, error = function(e) {
-  warning("Privacy check warning: ", e$message)
-})
-
-# Ensure ResponseId exists
-if (!"ResponseId" %in% names(df)) {
-  if ("respondent_id" %in% names(df)) {
-    df$ResponseId <- df$respondent_id
-  } else {
-    df$ResponseId <- paste0("R_", seq_len(nrow(df)))
-  }
+if (!is.null(role_text_col)) {
+  template$Role_Other_Text <- df[[role_text_col]]
 }
 
-# Standardize role column using config function
-df <- standardize_role_column(df, verbose = TRUE)
-
-# =============================================================================
-# IDENTIFY COLUMNS FOR TEMPLATE
-# =============================================================================
-
-# Find role columns using standard naming
-role_raw_candidates <- c("Q2.1", "role_raw", "QID174", "Role_Raw")
-role_text_candidates <- c("Q2.1_12_TEXT", "role_other", "QID174_12_TEXT", "Role_Other_Text")
-role_final_col <- "Final_Role_Category"  # Standardized by standardize_role_column()
-
-# Select available columns
-role_raw_col <- intersect(role_raw_candidates, names(df))[1]
-role_text_col <- intersect(role_text_candidates, names(df))[1]
-
-# Build template with available columns
-template_cols <- c("ResponseId")
-
-if (!is.na(role_raw_col)) {
-  template_cols <- c(template_cols, role_raw_col)
-}
-
-if (!is.na(role_text_col)) {
-  template_cols <- c(template_cols, role_text_col)
-}
-
-if (role_final_col %in% names(df)) {
-  template_cols <- c(template_cols, role_final_col)
-}
-
-# =============================================================================
-# CREATE TEMPLATE
-# =============================================================================
-
-# Create template with selected columns
-template <- df %>%
-  select(all_of(template_cols)) %>%
+# Add review metadata columns
+template <- template %>%
   mutate(
+    # Determine which rows need review
+    Needs_Review = case_when(
+      # Has "Other" text that needs classification
+      !is.null(role_text_col) & 
+        !is.na(Role_Other_Text) & 
+        Role_Other_Text != "" ~ "Yes",
+      
+      # In the catch-all category
+      Current_Category == "Miscellaneous and Individual Respondents" ~ "Maybe",
+      
+      # Everything else probably OK
+      TRUE ~ "No"
+    ),
+    
+    # Columns for manual corrections
     Suggested_New_Category = NA_character_,
     Reassignment_Reason = NA_character_,
     Reviewer_Notes = NA_character_,
     Review_Date = NA_character_,
     Reviewed_By = NA_character_
-  )
-
-# Add metadata columns for tracking
-template <- template %>%
-  mutate(
-    Original_Category = if (role_final_col %in% names(df)) df[[role_final_col]] else NA_character_,
-    Needs_Review = ifelse(
-      !is.na(role_text_col) & !is.na(df[[role_text_col]]) & df[[role_text_col]] != "",
-      "Yes", "No"
-    )
   )
 
 # Add classification metadata if available
@@ -150,82 +185,140 @@ if ("Classification_Date" %in% names(df)) {
   template$Classification_Date <- df$Classification_Date
 }
 
-# Sort by review priority (those needing review first)
+# Sort by review priority
 template <- template %>%
-  arrange(desc(Needs_Review), ResponseId)
+  arrange(desc(Needs_Review), !!sym(id_col))
 
 # =============================================================================
-# SAVE OUTPUT
+# SAVE TEMPLATE
 # =============================================================================
+# Define output path (add to PATHS dynamically if needed)
+if (!"manual_template" %in% names(PATHS)) {
+  PATHS$manual_template <- "output/manual_reassignment_template.csv"
+}
 
-# Use safe_path function from config
-output_file <- safe_path("output/manual_reassignment_template.csv")
-write.csv(template, output_file, row.names = FALSE)
+output_path <- safe_path(PATHS$manual_template)
+write_csv(template, output_path)
+cli_alert_success("Manual review template saved to: {.path {output_path}}")
 
 # =============================================================================
-# CREATE SUMMARY REPORT
+# SUMMARY STATISTICS
 # =============================================================================
+cli_h2("Template Summary")
 
-# Calculate statistics
 n_total <- nrow(template)
 n_needs_review <- sum(template$Needs_Review == "Yes", na.rm = TRUE)
-n_has_other_text <- sum(!is.na(role_text_col) & !is.na(df[[role_text_col]]) & df[[role_text_col]] != "", na.rm = TRUE)
+n_maybe_review <- sum(template$Needs_Review == "Maybe", na.rm = TRUE)
+n_no_review <- sum(template$Needs_Review == "No", na.rm = TRUE)
 
-# Count categories if available
-category_counts <- NULL
-if (role_final_col %in% names(df)) {
-  category_counts <- table(df[[role_final_col]], useNA = "ifany")
+# Summary box
+cli_div(theme = list(span.field = list(color = "blue", "font-weight" = "bold")))
+cli_ul(c(
+  "Total rows: {.field {n_total}}",
+  "Definitely needs review: {.field {n_needs_review}} ({round(100*n_needs_review/n_total, 1)}%)",
+  "May need review: {.field {n_maybe_review}} ({round(100*n_maybe_review/n_total, 1)}%)",
+  "No review needed: {.field {n_no_review}} ({round(100*n_no_review/n_total, 1)}%)",
+  "Data source: {.field {input_stage}}"
+))
+cli_end()
+
+# Show category distribution for reference
+cli_h3("Current Category Distribution (Top 10)")
+category_dist <- df %>%
+  count(!!sym(role_col), sort = TRUE, name = "Count") %>%
+  mutate(Percentage = sprintf("%.1f%%", 100 * Count / sum(Count))) %>%
+  head(10)
+
+# Format as a nice table
+for (i in seq_len(nrow(category_dist))) {
+  cli_text("  {sprintf('%2d', i)}. {sprintf('%-40s', category_dist[[1]][i])}: {sprintf('%4d', category_dist$Count[i])} ({category_dist$Percentage[i]})")
 }
 
 # =============================================================================
-# DISPLAY RESULTS
+# QUALITY CHECKS
 # =============================================================================
+cli_h2("Quality Checks")
 
-cat("\n=== MANUAL CLASSIFICATION TEMPLATE CREATED ===\n")
-cat("Source file: ", basename(infile), "\n", sep = "")
-cat("Pipeline stage: ", ifelse(infile == PATHS$final_1307, "Final (1307)",
-                               ifelse(infile == PATHS$preliminary_classified, "Preliminary", 
-                                     "Basic")), "\n", sep = "")
-cat("Total rows: ", n_total, "\n", sep = "")
-cat("Rows needing review: ", n_needs_review, "\n", sep = "")
-cat("Rows with 'Other' text: ", n_has_other_text, "\n", sep = "")
-cat("Output saved → ", output_file, "\n", sep = "")
+# Check for deprecated files
+deprecated_files <- check_deprecated(verbose = FALSE)
+if (length(deprecated_files) > 0) {
+  cli_alert_warning("Found {length(deprecated_files)} deprecated file(s) that should be removed:")
+  for (f in deprecated_files) {
+    cli_text("  • {.file {f}}")
+  }
+} else {
+  cli_alert_success("No deprecated files found")
+}
 
-if (!is.null(category_counts)) {
-  cat("\nCurrent category distribution:\n")
-  for (i in seq_along(category_counts)) {
-    cat(sprintf("  %-40s: %4d\n", names(category_counts)[i], category_counts[i]))
+# Check if we have enough context for manual review
+has_context <- (!is.null(role_raw_col) || !is.null(role_text_col))
+if (!has_context) {
+  cli_alert_warning("Limited context available for manual review (no raw role or text columns found)")
+  cli_alert_info("Consider using a dataset earlier in the pipeline for more context")
+}
+
+# =============================================================================
+# INSTRUCTIONS FOR USE
+# =============================================================================
+cli_h2("Instructions for Manual Review")
+
+cli_text("{.strong Step 1:} Open the template file")
+cli_bullets(c(
+  " " = "File location: {.path {output_path}}",
+  "i" = "Use Excel, LibreOffice Calc, or similar spreadsheet software"
+))
+
+cli_text("\n{.strong Step 2:} Review classifications")
+cli_bullets(c(
+  " " = "Rows are sorted with 'Needs_Review = Yes' at the top",
+  ">" = "Check 'Role_Other_Text' column for free-text responses",
+  ">" = "Compare with 'Current_Category' to identify misclassifications"
+))
+
+cli_text("\n{.strong Step 3:} Make corrections")
+cli_bullets(c(
+  " " = "Enter the correct category in 'Suggested_New_Category'",
+  " " = "Document your reasoning in 'Reassignment_Reason'",
+  " " = "Add any notes in 'Reviewer_Notes'",
+  "!" = "Use exact category names from Appendix J (see list above)"
+))
+
+cli_text("\n{.strong Step 4:} Complete metadata")
+cli_bullets(c(
+  " " = "Update 'Review_Date' with today's date (YYYY-MM-DD format)",
+  " " = "Enter your name/initials in 'Reviewed_By'"
+))
+
+cli_text("\n{.strong Step 5:} Save and apply")
+cli_bullets(c(
+  " " = "Save the file with a new name (e.g., manual_reassignment_complete.csv)",
+  "v" = "Run apply_manual_corrections.R to apply the changes to the dataset"
+))
+
+# =============================================================================
+# VALID CATEGORIES REFERENCE
+# =============================================================================
+cli_h2("Valid Appendix J Categories")
+cli_text("Use these exact category names when making corrections:")
+
+target_categories <- get_appendix_j_target()$Category
+for (i in seq_along(target_categories)) {
+  if (i %% 2 == 1) {
+    # Print two columns for compactness
+    cat1 <- sprintf("%-40s", target_categories[i])
+    if (i < length(target_categories)) {
+      cat2 <- target_categories[i + 1]
+      cli_text("  • {cat1}  • {cat2}")
+    } else {
+      cli_text("  • {cat1}")
+    }
   }
 }
 
-cat("\nColumns included in template:\n")
-for (col in names(template)) {
-  cat("  - ", col, "\n", sep = "")
-}
-
-cat("\n=== INSTRUCTIONS FOR MANUAL REVIEW ===\n")
-cat("1. Open output/manual_reassignment_template.csv in Excel or similar\n")
-cat("2. Review rows where Needs_Review = 'Yes' (sorted to top)\n")
-cat("3. For any misclassifications:\n")
-cat("   a. Enter correct category in 'Suggested_New_Category'\n")
-cat("   b. Provide reason in 'Reassignment_Reason'\n")
-cat("   c. Add any additional notes in 'Reviewer_Notes'\n")
-cat("4. Update 'Review_Date' (YYYY-MM-DD) and 'Reviewed_By' when complete\n")
-cat("5. Save the reviewed file with a new name (e.g., manual_reassignment_complete.csv)\n")
-cat("6. Run the reassignment application script to apply changes\n")
-
 # =============================================================================
-# QUALITY CHECK
+# COMPLETION MESSAGE
 # =============================================================================
-
-# Check for any deprecated paths in use
-deprecated_check <- check_deprecated(verbose = FALSE)
-if (length(deprecated_check) > 0) {
-  warning("\nWARNING: Deprecated files still exist in the project:")
-  for (f in deprecated_check) {
-    cat("  - ", f, " (should be removed)\n", sep = "")
-  }
-  cat("These files use old naming conventions and should be deleted.\n")
-}
-
-cat("\n=== TEMPLATE GENERATION COMPLETE ===\n")
+cli_rule()
+cli_alert_success("{.strong Template generation complete!}")
+cli_alert_info("Template contains {n_needs_review + n_maybe_review} rows flagged for potential review")
+cli_alert_info("Next step: Open {.path {basename(output_path)}} to begin manual review")

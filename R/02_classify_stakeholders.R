@@ -5,11 +5,12 @@ if (!exists(".local", inherits = TRUE)) .local <- function(...) NULL
 
 # 02_classify_stakeholders.R
 # Purpose: Produce stakeholder classifications per Appendix J methodology
-# Version: 3.1 - With robust case_when classification logic and STRICT privacy enforcement
+# Version: 3.2 - Fixed namespace issues
 # Key Changes:
 #   - STRICT privacy violation checking (stop_on_violation = TRUE)
 #   - Robust case_when classification logic for maintainability
 #   - Standardized column naming conventions
+#   - Fixed rlang::sym namespace usage
 # Outputs:
 #   - docs/appendix_j_classification_template.csv
 #   - data/survey_responses_anonymized_preliminary.csv
@@ -18,6 +19,7 @@ if (!exists(".local", inherits = TRUE)) .local <- function(...) NULL
 suppressPackageStartupMessages({
   library(tidyverse)
   library(stringr)
+  library(rlang)  # Explicitly load rlang for sym() function
 })
 
 # Source central configuration
@@ -283,7 +285,7 @@ classification_df <- classification_df %>%
   mutate(
     Classification_Stage = "preliminary",
     Classification_Date = Sys.Date(),
-    Classification_Version = "3.1"  # Updated version for strict privacy enforcement
+    Classification_Version = "3.2"  # Updated version for namespace fix
   )
 
 message("✓ Standardized column names applied")
@@ -360,9 +362,9 @@ audit_log <- summary_stats %>%
     Needs_Harmonization = sum(classification_df$needs_harmonization, na.rm = TRUE),
     Direct_Classification = sum(!classification_df$needs_harmonization, na.rm = TRUE),
     Pipeline_Stage = "Classification",
-    Script_Version = "3.1",  # Updated version for strict privacy enforcement
-    Classification_Method = "case_when",  # Document the improved method
-    Privacy_Check = "STRICT"  # Document strict privacy enforcement
+    Script_Version = "3.2",  # Updated version
+    Classification_Method = "case_when",
+    Privacy_Check = "STRICT"
   )
 
 write_csv(audit_log, out_audit)
@@ -404,8 +406,9 @@ if ("Final_Role_Category" %in% names(df_prelim)) {
 
 # Classification method verification
 message("\n=== CLASSIFICATION METHOD VERIFICATION ===")
-message("✓ Using robust case_when classification logic (v3.1)")
+message("✓ Using robust case_when classification logic (v3.2)")
 message("✓ Classification rules are now auditable and maintainable")
 message("✓ STRICT privacy enforcement enabled - pipeline will halt on PII detection")
+message("✓ Namespace issues fixed - rlang::sym properly used")
 
-message("\n✓ Classification complete with robust case_when logic, standardized column names, and STRICT privacy enforcement!")
+message("\n✓ Classification complete with robust case_when logic, standardized column names, STRICT privacy enforcement, and proper namespacing!")

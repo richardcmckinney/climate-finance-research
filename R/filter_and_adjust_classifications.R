@@ -136,7 +136,7 @@ if (length(validation$missing) > 0) {
 # Calculate current distribution
 curr <- df_complete %>% 
   count(.data[[role_col]], name = "Current") %>% 
-  rename(Category = !!role_col)
+  rename(Category = !!rlang::sym(role_col))  # FIX: Added rlang:: namespace
 
 # Compare with target
 cmp <- full_join(curr, target, by = "Category") %>%

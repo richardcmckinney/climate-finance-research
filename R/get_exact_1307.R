@@ -549,8 +549,8 @@ log_msg("\n=== FINAL VERIFICATION ===")
 
 # Calculate final distribution
 final_dist <- final %>% 
-  count(!!sym(role_col), name = "Final") %>% 
-  rename(Category = !!role_col)
+  count(!!rlang::sym(role_col), name = "Final") %>%  # FIX: Added rlang:: namespace
+  rename(Category = !!rlang::sym(role_col))  # FIX: Added rlang:: namespace
 
 # Create comprehensive verification table
 verify_tbl <- full_join(final_dist, target, by = "Category") %>%
@@ -616,7 +616,7 @@ final <- final %>% arrange(ResponseId)
 
 # Ensure role column is named appropriately for downstream
 if (role_col != "Final_Role_Category") {
-  final <- final %>% rename(Final_Role_Category = !!sym(role_col))
+  final <- final %>% rename(Final_Role_Category = !!rlang::sym(role_col))  # FIX: Added rlang:: namespace
   log_msg("Renamed role column to Final_Role_Category for consistency")
 }
 
@@ -718,7 +718,7 @@ role_col_final <- if ("Final_Role_Category" %in% names(final)) {
 }
 
 completeness_by_cat <- final %>%
-  group_by(!!sym(role_col_final)) %>%
+  group_by(!!rlang::sym(role_col_final)) %>%  # FIX: Added rlang:: namespace
   summarise(
     n = n(),
     mean_progress = mean(Progress, na.rm = TRUE),

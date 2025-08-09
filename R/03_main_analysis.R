@@ -100,13 +100,29 @@ if (SAVE_DIAGNOSTICS) {
 # Harmonize role column and make an ordered factor by size (for nicer plots/tables)
 role_col <- pick_role_col(df)
 df <- df %>%
-  rename(RoleCategory = !!sym(role_col)) %>%
+  rename(RoleCategory = !!rlang::sym(role_col)) %>%  # FIX: Added rlang:: namespace
   mutate(RoleCategory = if (!is.factor(RoleCategory)) factor(RoleCategory) else RoleCategory) %>%
   group_by(RoleCategory) %>%
   mutate(.role_n = n()) %>%
   ungroup() %>%
   mutate(RoleCategory = fct_reorder(RoleCategory, .role_n, .desc = TRUE)) %>%
   select(-.role_n)
+
+# Also fix line ~558 in the same file:
+role_col_final <- if ("Final_Role_Category" %in% names(final)) {
+  "Final_Role_Category"
+} else {
+  role_col
+}
+
+completeness_by_cat <- final %>%
+  group_by(!!rlang::sym(role_col_final)) %>%  # FIX: Added rlang:: namespace
+  summarise(
+    n = n(),
+    mean_progress = mean(Progress, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(mean_progress))
 
 # ============================================================================
 # FIGURE 4: Geographic Distribution of Survey Respondents

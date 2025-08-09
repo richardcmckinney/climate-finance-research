@@ -10,6 +10,16 @@ options(stringsAsFactors = FALSE)
 Sys.setenv(TZ = "UTC")
 set.seed(20240101)
 
+# Load required packages for functions in this config
+suppressPackageStartupMessages({
+  if (!requireNamespace("dplyr", quietly = TRUE)) {
+    stop("Package 'dplyr' is required but not installed")
+  }
+  if (!requireNamespace("rlang", quietly = TRUE)) {
+    stop("Package 'rlang' is required but not installed")
+  }
+})
+
 # =============================================================================
 # PATH CONFIGURATION (Single source of truth)
 # =============================================================================
@@ -200,6 +210,14 @@ check_privacy_violations <- function(df, stop_on_violation = TRUE) {
 
 # Standardization function for role columns
 standardize_role_column <- function(df, verbose = TRUE) {
+  # Ensure dplyr and rlang are available
+  if (!requireNamespace("dplyr", quietly = TRUE)) {
+    stop("Package 'dplyr' is required for standardize_role_column()")
+  }
+  if (!requireNamespace("rlang", quietly = TRUE)) {
+    stop("Package 'rlang' is required for standardize_role_column()")
+  }
+  
   # Possible role column names in order of preference
   role_variants <- c(
     "Final_Role_Category",
@@ -220,7 +238,7 @@ standardize_role_column <- function(df, verbose = TRUE) {
     if (verbose) {
       message("Standardizing role column: ", role_col, " -> Final_Role_Category")
     }
-    df <- df %>% dplyr::rename(Final_Role_Category = !!sym(role_col))
+    df <- dplyr::rename(df, Final_Role_Category = !!rlang::sym(role_col))
   }
   
   return(df)

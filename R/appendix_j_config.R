@@ -1,4 +1,4 @@
-_#!/usr/bin/env Rscript
+#!/usr/bin/env Rscript
 # appendix_j_config.R - Centralized Appendix J Target Distribution
 # Purpose: Single source of truth for target distribution quotas
 # Author: Richard McKinney
@@ -11,6 +11,11 @@ _#!/usr/bin/env Rscript
 # ========================= TARGET DISTRIBUTION =========================
 # Define target distribution as a function to ensure clean namespace
 get_appendix_j_target <- function() {
+  # Ensure tibble is available
+  if (!requireNamespace("tibble", quietly = TRUE)) {
+    stop("Package 'tibble' is required but not installed. Please install it with: install.packages('tibble')")
+  }
+  
   # Using tibble::tribble for clarity and maintainability
   # Total must equal 1,307 for publication requirements
   target <- tibble::tribble(

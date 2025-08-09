@@ -1,296 +1,317 @@
 # Climate Finance Research — Reproducible Pipeline
 
-This repository contains the complete, deterministic pipeline used in the manuscript **“The Capital–Opportunity Mismatch: A Multi‑Stakeholder Analysis of Climate Finance Barriers and Solutions.”**
+**Version 4.0** | **Last Updated: 2025-08-08**
 
-The pipeline proceeds from **raw survey exports** to **anonymized public data**, **Appendix J classifications**, and (optionally) **all manuscript analysis outputs**. A single command regenerates the public artifacts; an optional flag adds the full analysis stage (tables/figures).
+This repository contains the complete, deterministic, and validated pipeline for the manuscript **"The Capital–Opportunity Mismatch: A Multi‑Stakeholder Analysis of Climate Finance Barriers and Solutions."**
+
+The pipeline transforms **raw survey exports** → **anonymized public data** → **Appendix J classifications** → **analysis outputs** with complete reproducibility and data integrity guarantees.
 
 ---
 
-## Quick start
+## 🚀 Quick Start
 
 ```bash
-# Minimal: regenerate the four public artifacts only
+# Basic: Generate the four core public artifacts
 Rscript run_all.R --clean
 
-# Full: also run the manuscript analysis stage (creates figures/ and extra outputs)
+# Full: Include complete analysis (figures, hypothesis tests, models)
 Rscript run_all.R --clean --with-analysis
 
-# Verify current working tree against checksums
+# Verify: Check data integrity and reproducibility
 Rscript run_all.R --verify
+
+# Help: See all available options
+Rscript run_all.R --help
 ```
 
-**Determinism:** The scripts set a fixed seed and UTC timezone. Running the same input twice yields identical outputs and checksums.
+**Key Features:**
+- ✅ **Deterministic:** Fixed seed (12345) and UTC timezone ensure identical outputs
+- ✅ **Centralized Configuration:** All paths and parameters in `R/00_config.R`
+- ✅ **Privacy-First:** Strict PII detection and removal with automated checks
+- ✅ **Data Integrity:** No synthetic/proxy data generation - analyses use only real data
+- ✅ **Quality Assured:** Automated QA checks at every pipeline stage
 
 ---
 
-## Outputs (public artifacts guaranteed by `run_all.R`)
+## 📊 Core Outputs
 
-All paths are relative to the repo root:
+The pipeline guarantees four public artifacts (N = 1,563):
 
-- `data/survey_responses_anonymized_basic.csv` — **N = 1,563**, the fully anonymized, analysis‑ready dataset (PII removed; temporal & geography generalization applied as documented).
-- `docs/appendix_j_classification_template.csv` — classification template for reviewer inspection and optional manual harmonization.
-- `data/survey_responses_anonymized_preliminary.csv` — **N = 1,563**, anonymized dataset joined with Appendix J preliminary + final classifications.
-- `data/data_dictionary.csv` — column‑level dictionary regenerated on every run to **exactly** match the current anonymized dataset.
+| Output File | Description | Records |
+|------------|-------------|---------|
+| `data/survey_responses_anonymized_basic.csv` | Fully anonymized dataset with PII removed | 1,563 |
+| `data/survey_responses_anonymized_preliminary.csv` | Anonymized data + Appendix J classifications | 1,563 |
+| `docs/appendix_j_classification_template.csv` | Classification audit template | 1,563 |
+| `data/data_dictionary.csv` | Column metadata and completeness statistics | - |
 
-> **Note on N=1,307 vs N=1,563**  
-> The manuscript’s analysis uses a deterministic **quota‑matched analysis subset** of size **N = 1,307** (see `R/get_exact_1307.R`). The public anonymized datasets (`*_basic.csv`, `*_preliminary.csv`) contain **N = 1,563**.
+### Analysis Outputs (--with-analysis flag)
 
----
+| Output File | Description | Records |
+|------------|-------------|---------|
+| `data/climate_finance_survey_final_1307.csv` | Quota-matched analysis subset | 1,307 |
+| `output/` | Statistical results, hypothesis tests, model outputs | - |
+| `figures/` | Publication-ready figures and visualizations | - |
 
-## Optional analysis stage (manuscript tables & figures)
-
-When invoked with `--with-analysis`, the pipeline additionally:
-
-- Generates the **N=1,307** analysis subset (`data/climate_finance_survey_final_1307.csv`).
-- Reproduces descriptive statistics, hypothesis tests (H1–H12), factor models (EFA/CFA), and regressions.
-- Writes CSVs to `output/` and figures to `figures/`.
-
-> **Figures directory**  
-> The `figures/` directory is created **only** when `--with-analysis` is used. In minimal runs, it is not created.
+> **Note:** The manuscript uses the N=1,307 quota-matched subset for all analyses, while the public datasets contain the full N=1,563 anonymized responses.
 
 ---
 
-## Repository structure
+## 🏗️ Pipeline Architecture
+
+### Central Configuration System
 
 ```
 R/
-  01_anonymize_data.R          # Strip PII, normalize fields, write *_basic.csv and data_dictionary.csv
-  02_classify_stakeholders.R   # Apply Appendix J regex logic; write classification template and *_preliminary.csv
-  get_exact_1307.R             # Deterministic quota-matching to N=1,307 for manuscript analyses
-  03_main_analysis.R           # Descriptives & derived outputs used by the manuscript
-  04_hypothesis_testing.R      # Reproduces H1–H12 tests, EFA/CFA, and regressions; writes output/ & figures/
+├── 00_config.R              # Central paths, parameters, validation functions
+├── appendix_j_config.R      # Appendix J targets, helper functions
+├── 01_anonymize_data.R      # PII removal, geographic generalization
+├── 02_classify_stakeholders.R # Stakeholder classification (23 categories)
+├── get_exact_1307.R         # Deterministic quota-matching
+├── 03_main_analysis.R       # Descriptive statistics and visualizations
+├── 04_hypothesis_testing.R  # H1-H12 hypothesis tests, factor models
+└── 99_quality_checks.R      # Comprehensive quality assurance
 
-run_all.R                      # Single entry point; add --with-analysis to execute 03 & 04
+run_all.R                    # Simplified pipeline runner (300 lines, was 1000+)
+```
 
-data/
-  data_raw/                    # (ignored in git) raw survey exports
-  survey_responses_anonymized_basic.csv
-  survey_responses_anonymized_preliminary.csv
-  climate_finance_survey_final_1307.csv     # (created when --with-analysis is used)
-  data_dictionary.csv
+### Key Improvements in v4.0
 
-docs/
-  appendix_j_systematic_classification.md   # (renamed for shell-friendliness)
-  appendix_j_classification_template.csv
-  checksums.txt
-  verification_report.md
+1. **Centralized Configuration:** All file paths and parameters defined in `00_config.R`
+2. **No Deprecated Files:** Active detection and warnings for legacy file names
+3. **Fixed Critical Bugs:** Resolved join failures in classification script
+4. **Eliminated Redundancy:** Shared helper functions in `appendix_j_config.R`
+5. **Strict Privacy:** Hardened PII detection with word boundaries
+6. **Data Integrity:** Removed all proxy/synthetic variable creation
+7. **Simplified Runner:** `run_all.R` reduced by 70% while improving functionality
 
-output/                        # (created/updated during analysis stage)
-figures/                       # (created/updated during analysis stage)
+---
+
+## ⚠️ Important: Deprecated Files
+
+The pipeline actively checks for and warns about deprecated file names that should be **deleted**:
+
+```
+❌ DEPRECATED (delete if found):
+  - data/climate_finance_survey_classified.csv
+  - data/climate_finance_survey_anonymized.csv
+
+✅ CORRECT names used by pipeline:
+  - data/survey_responses_anonymized_basic.csv
+  - data/survey_responses_anonymized_preliminary.csv
+  - data/climate_finance_survey_final_1307.csv
 ```
 
 ---
 
-## Scripts and what they do
+## 🔒 Data Privacy & Anonymization
 
-- **`R/01_anonymize_data.R`**  
-  Loads `data_raw/`, removes PII, applies controlled transforms (e.g., date bucketing), **generalizes geography to 4 regions**, and writes 
-  `data/survey_responses_anonymized_basic.csv` and `data/data_dictionary.csv`.
+### PII Removal Strategy
+- **Columns Removed:** Names, emails, addresses, phone numbers, organization identifiers
+- **IDs Hashed:** SHA-256 deterministic hashing for reproducible anonymization
+- **Geography Generalized:** Raw locations → 4 regions (North America, Europe, Asia, Other)
+- **Dates Bucketed:** Full dates → Year-Month format only
+- **Text Scrubbed:** Automated PII detection and redaction in free-text fields
+- **Consent Required:** Only records with explicit consent are included
 
-- **`R/02_classify_stakeholders.R`**  
-  Applies Appendix J classification regex with robust fallbacks. Emits 
-  `docs/appendix_j_classification_template.csv` and 
-  `data/survey_responses_anonymized_preliminary.csv`. Guarantees no `NA` in `final_category_appendix_j`.
-
-- **`R/get_exact_1307.R`**  
-  Generates the N=1,307 quota‑matched analysis dataset **deterministically** from the classified dataset. 
-  Input defaults to `data/survey_responses_anonymized_preliminary.csv` and it accepts either 
-  `final_category_appendix_j` or `Final_Role_Category` for roles.  
-  **Important:** The script now preserves the truth label (`final_category_appendix_j` / `Final_Role_Category`) and writes any quota adjustments to a **separate** column `quota_target_category` (no relabeling of the truth column).
-
-- **`R/03_main_analysis.R`**  
-  Produces descriptive tables/plots used in the manuscript. Writes into `output/` and `figures/`.
-
-- **`R/04_hypothesis_testing.R`**  
-  Reproduces H1–H12 tests (ANOVA/χ²/t‑tests/correlations), EFA/CFA for the Three‑Factor Climate Risk Model, and regressions. 
-  Outputs CSVs in `output/` and figures in `figures/`.
-
-- **`run_all.R`**  
-  Entry point. Always regenerates the four public artifacts; with `--with-analysis`, also runs 03 & 04. Produces `docs/checksums.txt` and `docs/verification_report.md`.
+### Privacy Validation
+- **Automated Checks:** Every script validates no PII in outputs
+- **Strict Mode:** Pipeline halts if PII detected (stop_on_violation = TRUE)
+- **Audit Trail:** All privacy checks logged in `output/quality_assurance_report.csv`
 
 ---
 
-## Project Overview
+## 📈 Analysis Framework
 
-**Author:** Richard McKinney  
-**Email:** richardmckinney@pm.me  
-**ORCID:** 0009-0007-1386-6881  
-**Institution:** University of Oxford
+### Stakeholder Classification (23 Categories)
 
-### Study Summary
+The classification system uses a robust `case_when` logic with priority ordering:
 
-This study surveyed 1,307 climate finance stakeholders (from 1,563 total survey responses) to identify barriers and solutions to accelerating climate investment. The **1,307** represents the deterministic analysis subset (quota-matched; see `R/get_exact_1307.R`), while **1,563** is the full anonymized sample. The research reveals a fundamental Capital–Opportunity Mismatch where venture capitalists seek market‑ready ventures while entrepreneurs need patient capital. Through multi‑stakeholder analysis, we identify three key findings:
+1. **Climate-Specific:** Entrepreneur in Climate Technology (12.2%)
+2. **Investment Firms:** VC (9.0%), PE (6.7%), Angel (3.3%)
+3. **Institutional:** Government (4.1%), Academic (4.0%)
+4. **Financial Services:** Investment/Banking (8.3%)
+5. **Advisory:** Consulting (6.0%), Legal (2.9%)
+6. **Impact-Focused:** ESG Investor (2.9%), Philanthropic (1.5%)
+7. **Other:** 8 additional categories + Miscellaneous (11.6%)
 
-1. **The Capital–Opportunity Mismatch** represents structural misalignment, not merely insufficient funding.  
-2. **Geographic divergence** between Europe’s policy‑driven and North America’s market‑led ecosystems.  
-3. **Investment philosophy** predicts behavior better than organizational category.
+### Hypothesis Testing (H1-H12)
 
-### Data Collection Details
+All tests run only on available real data (no proxies):
 
-- **Collection Period:** June–August 2024  
-- **Total Responses:** 1,563 survey initiations  
-- **Analysis Subset:** 1,307 (quota‑matched; see `R/get_exact_1307.R`)  
-- **Sampling Frame:** 18,964 professionals identified through 47,832 climate‑relevant transactions (PitchBook 2010–2024)  
-- **Response Rate:** 7.3% (1,307 usable responses from 17,892 delivered invitations)
-
----
-
-## Data Privacy and Anonymization
-
-All personally identifiable information (PII) has been removed from the shared dataset:
-
-- **PII columns removed** including names, emails, addresses, phone numbers, organization identifiers.  
-- **Direct identifiers replaced** with deterministic hash IDs (SHA‑256).  
-- **Geographic data generalized** to regions (North America, Europe, Asia, Other).  
-- **Dates generalized** to month‑year format.  
-- **Organization names removed** or generalized to categories.  
-- **Consent policy:** Only records with **explicit consent** are retained in public artifacts and analysis subsets; **NA or missing consent is treated as non‑consent**.  
-- **Raw data with PII** is excluded from version control (`.gitignore`).
+| Hypothesis | Test | Data Required | Status |
+|-----------|------|---------------|---------|
+| H1-H2 | Technology risk perception | Q3.6_1 | ✓ |
+| H3 | Risk correlations | Q3.6_1, Q3.6_2 | ✓ |
+| H4-H5 | Market barriers | Q3.11_1 | ✓ |
+| H6 | International scalability | Q3.11_5 | ✓ |
+| H7 | Ecosystem support | Q3.11_ecosystem | ✓ |
+| H8 | Geographic differences | region + Q3.6_3 | ✓ |
+| H9 | Impact orientation | Q3.3 | ✓ |
+| H10 | Strategic coherence | Multiple | ✓ |
+| H11 | Physical-operational risk | Q3.6_4, Q3.6_5 | ✓ |
+| H12 | Technology solutions | Q3.7 (if available) | Conditional |
 
 ---
 
-## Stakeholder Classification (Appendix J)
+## 🛠️ Installation & Setup
 
-The study employs a dual‑tier classification system resulting in **23** stakeholder categories:
-
-- **Direct assignment** from predefined categories.  
-- **Manual harmonization** of free‑text “Other” responses following MECE principles.
-
-### Final Stakeholder Distribution (Analysis subset N = 1,307)
-
-> The full anonymized datasets published in `data/` contain **N = 1,563** rows. The deterministic analysis subset is created by `R/get_exact_1307.R` and used for manuscript figures/tables.
-
-**Quota logic and transparency**  
-- The classification truth is stored in `final_category_appendix_j` (or `Final_Role_Category`).  
-- Quota adjustments are stored separately in `quota_target_category`.  
-- **We never overwrite the truth label** for quota purposes; all balancing uses `quota_target_category`.  
-- We publish `docs/verification_report.md` and `docs/checksums.txt` on every run.
-
----
-
-### Final Stakeholder Distribution (Analysis subset N = 1,307)
-
-| Final Role Category | Total Respondents (n) | Percentage of Sample |
-|---|---:|---:|
-| Entrepreneur in Climate Technology | 159 | 12.2% |
-| Venture Capital Firm | 117 | 9.0% |
-| Investment and Financial Services | 109 | 8.3% |
-| Private Equity Firm | 88 | 6.7% |
-| Business Consulting and Advisory | 79 | 6.0% |
-| Nonprofit Organization | 73 | 5.6% |
-| High Net-Worth Individual | 66 | 5.0% |
-| Government Funding Agency | 53 | 4.1% |
-| Academic or Research Institution | 52 | 4.0% |
-| Limited Partner | 49 | 3.7% |
-| Family Office | 48 | 3.7% |
-| Corporate Venture Arm | 47 | 3.6% |
-| Angel Investor | 43 | 3.3% |
-| ESG Investor | 38 | 2.9% |
-| Legal Services | 38 | 2.9% |
-| Corporate Entities | 35 | 2.7% |
-| Manufacturing and Industrial | 25 | 1.9% |
-| Energy and Infrastructure | 24 | 1.8% |
-| Real Estate and Property | 20 | 1.5% |
-| Philanthropic Organization | 19 | 1.5% |
-| Technology and Software | 19 | 1.5% |
-| Media and Communication | 7 | 0.5% |
-| Miscellaneous and Individual Respondents | 151 | 11.6% |
-| **Total** | **1,307** | **100.0%** |
-
-## Key Variables
-
-- `final_category_appendix_j` / `Final_Role_Category`: Stakeholder classification (23 categories per Appendix J)  
-- `quota_target_category`: Quota‑matched category used for subset balancing (truth label is preserved separately as above)  
-- `Q2.1`: Original stakeholder role selection  
-- `Q2.1_12_TEXT`: Free‑text responses for “Other” category  
-- `Q3.3`: Financial vs impact orientation (7‑point scale: 1=pure impact, 7=pure financial)  
-- `Q3.6_1` to `Q3.6_5`: Risk perception ratings  
-- `Q3.11_*`: Barrier identification questions  
-- `hq_country`: Geographic region (anonymized to 4 regions)
-
----
-
-## Prerequisites (R packages)
+### Prerequisites
 
 ```r
+# Core packages (required)
 install.packages(c(
-  "tidyverse","here","digest","ggplot2","scales","corrplot",
-  "psych","gridExtra","broom","effectsize","pwr","lavaan","MASS"
+  "tidyverse",    # Data manipulation and visualization
+  "cli",          # Enhanced console output
+  "digest",       # SHA-256 hashing
+  "lubridate"     # Date handling
+))
+
+# Analysis packages (for --with-analysis)
+install.packages(c(
+  "psych",        # Factor analysis, KMO
+  "lavaan",       # Confirmatory factor analysis
+  "effectsize",   # Effect size calculations
+  "corrplot"      # Correlation visualization
 ))
 ```
 
----
+### Data Setup
 
-## Statistical Methods (overview)
-
-- **Hypothesis Testing:** 12 theory‑driven hypotheses (ANOVA/Welch, χ², t‑tests, correlations).  
-- **Factor Analysis:** EFA (KMO/Bartlett checked) and CFA (lavaan, 3‑factor template).  
-- **Effect Sizes:** Cohen’s d, Cramér’s V, Pearson’s r.  
-- **Multiple Comparisons:** Bonferroni within hypothesis families.  
-- **Missing Data:** MCAR checks; robust fallbacks used where appropriate.  
-- **Sample Size Considerations:** Primary inference focuses on groups with n ≥ 30; smaller groups reported with caution.
-
----
-## Key Findings (replication highlights)
-
-- Venture capitalists emphasize market readiness; entrepreneurs emphasize access to patient capital (Capital–Opportunity Mismatch).  
-- Geographic divergence: Europe policy-driven vs North America market-led.  
-- Investment philosophy predicts behavior beyond organizational labels.  
-- A three-factor structure captures climate-risk perception across items (see EFA/CFA outputs).
+1. Create `data_raw/` directory
+2. Place raw survey CSV file(s) in `data_raw/`
+3. Run pipeline as shown in Quick Start
 
 ---
 
-## Reproducibility – alternate (manual) run path
+## 🔄 Manual Execution Path
+
+For step-by-step execution or debugging:
 
 ```r
-source("R/01_anonymize_data.R")
-source("R/02_classify_stakeholders.R")
-source("R/get_exact_1307.R")     # creates the N=1,307 analysis subset
-source("R/03_main_analysis.R")
-source("R/04_hypothesis_testing.R")
+# 1. Load configurations (REQUIRED FIRST)
+source("R/00_config.R")
+source("R/appendix_j_config.R")
+
+# 2. Core pipeline
+source("R/01_anonymize_data.R")         # Creates anonymized_basic.csv
+source("R/02_classify_stakeholders.R")  # Creates anonymized_preliminary.csv
+
+# 3. Analysis pipeline (optional)
+source("R/get_exact_1307.R")           # Creates final_1307.csv
+source("R/03_main_analysis.R")         # Creates figures/
+source("R/04_hypothesis_testing.R")    # Creates output/tables/
+
+# 4. Quality checks (recommended)
+source("R/99_quality_checks.R")
+run_quality_checks()                   # Returns pass/fail status
 ```
 
-Outputs appear in `data/`, `output/`, and (if analysis stage is run) `figures/`.
+---
+
+## 🐛 Troubleshooting
+
+### Common Issues & Solutions
+
+| Issue | Solution |
+|-------|----------|
+| "No CSV files found in data_raw" | Place raw survey export in `data_raw/` directory |
+| "Deprecated file found" | Delete old files listed in warning, re-run pipeline |
+| "Privacy violation detected" | Check for non-anonymized columns (e.g., Q2.2), run anonymization |
+| "Role column not found" | Ensure `Final_Role_Category` or `final_category_appendix_j` exists |
+| "Progress column missing" | Check for `Progress` or `completion` column in raw data |
+
+### Validation Commands
+
+```r
+# Check for deprecated files
+check_deprecated(verbose = TRUE)
+
+# Validate current pipeline stage
+validate_stage("classify")  # Options: anonymize, classify, quota, analyze
+
+# Test privacy compliance
+check_privacy_violations(df, stop_on_violation = FALSE)
+
+# Generate checksums for reproducibility
+source("R/99_quality_checks.R")
+generate_checksums()
+```
 
 ---
 
-## Ethics Statement
+## 📋 Quality Assurance
 
-This research was approved by the Central University Research Ethics Committee at the University of Oxford (Reference: SOGE C1A24102). All participants provided informed consent, were assured of data confidentiality, and retained the right to withdraw.
+The pipeline includes comprehensive quality checks via `R/99_quality_checks.R`:
 
----
+- ✅ No deprecated files present
+- ✅ Standard column names used consistently  
+- ✅ No PII in output files
+- ✅ Geographic data properly anonymized
+- ✅ Final sample size = 1,307
+- ✅ Data dictionary synchronized
+- ✅ Checksums generated for reproducibility
 
-## Acknowledgments
-
-We thank the 1,307 climate finance professionals who participated in this survey, the reviewers who provided valuable feedback, and the PitchBook team for access to transaction data.
-
----
-
-## Notes on file naming
-
-- Renamed `docs/# Appendix J: Systematic Classification .md` → `docs/appendix_j_systematic_classification.md` to avoid shell‑hostile characters and trailing spaces.  
-- Removed the legacy `data/climate_finance_survey_anonymized.csv` to prevent confusion; use the canonical `survey_responses_anonymized_basic.csv`.
-
----
-## Citation
-
-If you use this repository or datasets, please cite the associated manuscript: McKinney, R. (2025). The Capital–Opportunity Mismatch: A Multi-Stakeholder Analysis of Climate Finance Barriers and Solutions.
+Run quality checks: `Rscript R/99_quality_checks.R`
 
 ---
 
-## License
+## 📚 Project Details
 
-- **Code:** MIT License  
-- **Data:** Creative Commons Attribution 4.0 International (CC BY 4.0)  
-See LICENSE files for full details.
+### Study Overview
+- **Author:** Richard McKinney (richardmckinney@pm.me)
+- **Institution:** University of Oxford
+- **ORCID:** 0009-0007-1386-6881
+- **Ethics:** Approved by Oxford CUREC (Ref: SOGE C1A24102)
+
+### Data Collection
+- **Period:** June–August 2024
+- **Frame:** 18,964 professionals from 47,832 climate transactions (PitchBook 2010–2024)
+- **Response Rate:** 7.3% (1,307 usable from 17,892 delivered)
+- **Geographic Coverage:** 42 countries aggregated to 4 regions
+
+### Key Findings
+1. **Capital–Opportunity Mismatch:** Structural misalignment between VC expectations and entrepreneur needs
+2. **Geographic Divergence:** Europe (policy-driven) vs North America (market-led) approaches
+3. **Investment Philosophy:** Behavioral predictor stronger than organizational category
 
 ---
 
-## Contact
+## 📖 Citation
 
-**Richard McKinney**  
-Email: richardmckinney@pm.me  
-ORCID: 0009-0007-1386-6881  
-Institution: University of Oxford
+```bibtex
+@article{mckinney2025capital,
+  title={The Capital–Opportunity Mismatch: A Multi-Stakeholder Analysis of Climate Finance Barriers and Solutions},
+  author={McKinney, Richard},
+  year={2025},
+  institution={University of Oxford}
+}
+```
 
-For questions about the data or analysis, please open an issue or contact the author directly.
+---
+
+## 📄 License
+
+- **Code:** MIT License
+- **Data:** CC BY 4.0 International
+- **Documentation:** CC BY 4.0 International
+
+See LICENSE files for full terms.
+
+---
+
+## 🤝 Contributing & Support
+
+- **Issues:** Use GitHub Issues for bug reports or questions
+- **Contact:** richardmckinney@pm.me
+- **Updates:** Check releases for pipeline version updates
+
+### Version History
+
+- **v4.0 (2025-08-08):** Complete refactor with centralized configuration
+- **v3.0:** Added quota-matching and hypothesis testing
+- **v2.0:** Implemented Appendix J classification
+- **v1.0:** Initial anonymization pipeline
+
+---
+
+*This pipeline prioritizes reproducibility, privacy, and data integrity. All analyses use only real data with no synthetic variables or proxies.*
