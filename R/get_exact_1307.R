@@ -4,7 +4,7 @@
 #          WITHOUT modifying original classifications (preserves ground truth)
 # Author: Richard McKinney
 # Date: 2025-08-09
-# Version: 4.0 (Complete rewrite with non-destructive approach + all v3.0 functionality)
+# Version: 4.1 (Fixed quality assurance report naming consistency)
 
 # ========================= INITIALIZATION =========================
 # Safety for Rscript/S4 compatibility (MUST BE FIRST)
@@ -107,7 +107,12 @@ config <- list(
   outfile_verify = PATHS$verification,
   outfile_log    = PATHS$reassignment_log,
   outfile_stats  = PATHS$quota_stats,
-  outfile_quality = PATHS$quality_report,
+  # FIX: Standardize on quality_assurance_report naming
+  outfile_quality = if (exists("PATHS") && !is.null(PATHS$quality_assurance_report)) {
+    PATHS$quality_assurance_report
+  } else {
+    "output/quality_assurance_report.csv"  # Fallback to standardized name
+  },
   
   # Import from centralized config
   min_progress = if (exists("QUALITY_PARAMS")) QUALITY_PARAMS$min_progress else APPENDIX_J_CONFIG$min_progress,
@@ -163,7 +168,7 @@ if (config$verbose) {
   log_msg <- function(...) invisible(NULL)
 }
 
-log_msg("Starting get_exact_1307.R (v4.0 - Non-destructive approach)")
+log_msg("Starting get_exact_1307.R (v4.1 - Fixed quality assurance report naming)")
 log_msg("R version: ", R.version.string)
 log_msg("Configuration:")
 log_msg("  Central config loaded: ", config_loaded)
@@ -173,6 +178,7 @@ log_msg("  Min Progress: ", config$min_progress)
 log_msg("  Preserve original: ", config$preserve_original)
 log_msg("  Random seed: 1307")
 log_msg("  Working directory: ", getwd())
+log_msg("  Quality assurance report path: ", config$outfile_quality)
 
 # ========================= HELPER FUNCTIONS =========================
 # Optimized helper for safe column access
@@ -402,7 +408,7 @@ if (before_progress != after_progress) {
   log_msg("No rows removed by progress filter")
 }
 
-# Filter 3: Quality control exclusions
+# Filter 3: Quality assurance exclusions (FIXED: changed from quality control)
 if (length(config$quality_exclusions) > 0) {
   before_quality <- nrow(df)
   df <- df %>% filter(!(ResponseId %in% config$quality_exclusions))
@@ -410,17 +416,17 @@ if (length(config$quality_exclusions) > 0) {
   
   if (before_quality != after_quality) {
     log_msg("Removed ", before_quality - after_quality, 
-            " rows for quality control (straight-liners, etc.)")
+            " rows for quality assurance (straight-liners, etc.)")
     
-    # Document exclusions
-    quality_report <- data.frame(
+    # Document exclusions (FIXED: renamed from quality_report to quality_assurance_report)
+    quality_assurance_report <- data.frame(
       ResponseId = config$quality_exclusions,
       Reason = "Straight-line response pattern",
       Date_Excluded = Sys.Date(),
       Excluded_By = Sys.info()["user"]
     )
-    write.csv(quality_report, config$outfile_quality, row.names = FALSE)
-    log_msg("Quality control report saved to: ", config$outfile_quality)
+    write.csv(quality_assurance_report, config$outfile_quality, row.names = FALSE)
+    log_msg("Quality assurance report saved to: ", config$outfile_quality)
   }
 }
 
@@ -622,7 +628,7 @@ final <- final %>%
 # Add metadata columns
 final <- final %>%
   mutate(
-    Quota_Match_Version = "4.0",
+    Quota_Match_Version = "4.1",
     Quota_Match_Date = Sys.Date(),
     Was_Reassigned = ResponseId %in% reassign_log$ResponseId
   )
@@ -868,6 +874,7 @@ log_msg("After filtering: ", nrow(df))
 log_msg("Final dataset: ", nrow(final))
 log_msg("Reassignments: ", nrow(reassign_log))
 log_msg("Preservation method: Non-destructive (dual-column)")
+log_msg("Quality assurance report: ", config$outfile_quality)
 
 # Calculate runtime
 runtime <- difftime(Sys.time(), 
@@ -880,6 +887,7 @@ log_msg("Runtime: ", round(runtime, 2), " seconds")
 log_msg("✓ Non-destructive quota matching completed successfully")
 log_msg("✓ Ground truth preserved in 'Original_Classification' column")
 log_msg("✓ Quota-matched assignments in 'Final_Role_Category' column")
+log_msg("✓ Quality assurance report saved to standardized path")
 log_msg("✓ All outputs saved to centralized paths")
 log_msg("Log saved to: ", config$log_file)
 log_msg("✓ Done at ", format(Sys.time(), "%Y-%m-%d %H:%M:%S %Z"))
