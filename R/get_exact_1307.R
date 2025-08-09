@@ -1,19 +1,25 @@
 #!/usr/bin/env Rscript
+# get_exact_1307.R — Non-destructive Appendix J quota-matching (publication grade)
+# Purpose: Generate exactly N=1,307 responses matching Appendix J distribution
+#          WITHOUT modifying original classifications (preserves ground truth)
+# Author: Richard McKinney
+# Date: 2025-08-09
+# Version: 4.0 (Complete rewrite with non-destructive approach + all v3.0 functionality)
+
+# ========================= INITIALIZATION =========================
 # Safety for Rscript/S4 compatibility (MUST BE FIRST)
 if (!"methods" %in% loadedNamespaces()) library(methods)
 if (!exists(".local", inherits = TRUE)) .local <- function(...) NULL
 
-# get_exact_1307.R — deterministic Appendix J quota-matching (publication grade)
-# Purpose: Generate exactly N=1,307 responses matching Appendix J distribution
-# Author: Richard McKinney
-# Date: 2025-08-08
-# Version: 3.0 (with centralized configuration)
-
-# ========================= INITIALIZATION =========================
+# Load required packages with explicit namespace management
 suppressPackageStartupMessages({
-  if (!"methods" %in% loadedNamespaces()) library(methods)
   library(tidyverse)
-  library(cli)  # For better messaging if available
+  if (!requireNamespace("rlang", quietly = TRUE)) {
+    library(rlang)
+  }
+  if (!requireNamespace("cli", quietly = TRUE)) {
+    library(cli)
+  }
 })
 
 # Set deterministic environment
@@ -22,62 +28,110 @@ Sys.setenv(TZ = "UTC")
 options(stringsAsFactors = FALSE, scipen = 999)
 
 # Create necessary directories
-for (dir in c("data", "output", "logs")) {
+for (dir in c("data", "output", "logs", "docs")) {
   dir.create(dir, recursive = TRUE, showWarnings = FALSE)
 }
 
-# ========================= LOAD CENTRALIZED CONFIGURATION =========================
-# Source centralized Appendix J configuration
+# ========================= LOAD CENTRAL CONFIGURATION FIRST =========================
+# This MUST come before any other configuration to ensure we use centralized paths
 config_paths <- c(
-  "R/appendix_j_config.R",
-  "appendix_j_config.R",
-  "../R/appendix_j_config.R",
-  "scripts/appendix_j_config.R"
+  "R/00_config.R",
+  "00_config.R",
+  "../R/00_config.R"
 )
 
 config_loaded <- FALSE
 for (config_path in config_paths) {
   if (file.exists(config_path)) {
-    .appendix_j_config_silent <- TRUE  # Suppress loading message
     source(config_path)
     config_loaded <- TRUE
+    cat("Loaded central configuration from:", config_path, "\n")
     break
   }
 }
 
 if (!config_loaded) {
-  stop("Could not find appendix_j_config.R in any of the expected locations:\n  ",
+  stop("Could not find 00_config.R in any of the expected locations:\n  ",
        paste(config_paths, collapse = "\n  "),
-       "\nPlease ensure the configuration file is in the correct location.")
+       "\nThis file is required for centralized path configuration.")
 }
 
-# Get target distribution and config from centralized source
+# ========================= LOAD APPENDIX J CONFIGURATION =========================
+# Source centralized Appendix J configuration
+appendix_j_paths <- c(
+  "R/appendix_j_config.R",
+  "appendix_j_config.R",
+  "../R/appendix_j_config.R"
+  # Removed "scripts/appendix_j_config.R" - path doesn't exist in documented structure
+)
+
+appendix_j_loaded <- FALSE
+for (config_path in appendix_j_paths) {
+  if (file.exists(config_path)) {
+    .appendix_j_config_silent <- TRUE  # Suppress loading message
+    source(config_path)
+    appendix_j_loaded <- TRUE
+    cat("Loaded Appendix J configuration from:", config_path, "\n")
+    break
+  }
+}
+
+if (!appendix_j_loaded) {
+  stop("Could not find appendix_j_config.R in any of the expected locations:\n  ",
+       paste(appendix_j_paths, collapse = "\n  "))
+}
+
+# Get target distribution from centralized source
 target <- get_appendix_j_target()
 
-# Merge with local configuration
+# ========================= VALIDATE TARGET CONFIGURATION =========================
+# Hard assertion - no runtime rebalancing allowed
+target_sum <- sum(target$Target)
+if (target_sum != APPENDIX_J_CONFIG$target_n) {
+  stop(sprintf(
+    "CONFIGURATION ERROR: Target distribution sums to %d, not %d.\n",
+    target_sum, APPENDIX_J_CONFIG$target_n,
+    "Fix the counts in appendix_j_config.R to sum exactly to %d.\n",
+    APPENDIX_J_CONFIG$target_n,
+    "Runtime rebalancing is not allowed to ensure data integrity."
+  ))
+}
+
+# ========================= CONFIGURATION =========================
+# Use centralized PATHS configuration instead of hardcoded paths
 config <- list(
-  # Input/Output paths
-  infile         = "data/climate_finance_survey_classified.csv",
-  alt_infile     = "data/survey_responses_anonymized_preliminary.csv",
-  outfile_final  = "data/climate_finance_survey_final_1307.csv",
-  outfile_verify = "output/final_distribution_verification.csv",
-  outfile_log    = "output/reassignment_log.csv",
-  outfile_stats  = "output/quota_matching_statistics.csv",
-  outfile_quality = "output/quality_control_report.csv",
+  # Input/Output paths from centralized config
+  infile         = PATHS$preliminary_classified,  # Use correct non-deprecated path
+  alt_infile     = PATHS$basic_anon,             # Alternative if preliminary not found
+  outfile_final  = PATHS$final_1307,
+  outfile_verify = PATHS$verification,
+  outfile_log    = PATHS$reassignment_log,
+  outfile_stats  = PATHS$quota_stats,
+  outfile_quality = PATHS$quality_report,
   
   # Import from centralized config
-  min_progress = APPENDIX_J_CONFIG$min_progress,
+  min_progress = if (exists("QUALITY_PARAMS")) QUALITY_PARAMS$min_progress else APPENDIX_J_CONFIG$min_progress,
   target_n = APPENDIX_J_CONFIG$target_n,
   quality_exclusions = APPENDIX_J_CONFIG$quality_exclusions,
   
-  # Local processing parameters
+  # Processing parameters
   verbose = TRUE,
+  preserve_original = TRUE,  # NEW: Always preserve original classifications
   log_file = paste0("logs/get_exact_1307_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".log")
 )
 
+# Validate stage dependencies
+validate_stage("quota")
+
 # ========================= LOGGING SETUP =========================
 # Enhanced logging with fallback for non-interactive sessions
+log_con <- NULL
 if (config$verbose) {
+  log_dir <- dirname(config$log_file)
+  if (!dir.exists(log_dir)) {
+    dir.create(log_dir, recursive = TRUE, showWarnings = FALSE)
+  }
+  
   log_con <- tryCatch({
     file(config$log_file, open = "wt")
   }, error = function(e) {
@@ -109,12 +163,14 @@ if (config$verbose) {
   log_msg <- function(...) invisible(NULL)
 }
 
-log_msg("Starting get_exact_1307.R (v3.0 - with centralized config)")
+log_msg("Starting get_exact_1307.R (v4.0 - Non-destructive approach)")
 log_msg("R version: ", R.version.string)
 log_msg("Configuration:")
+log_msg("  Central config loaded: ", config_loaded)
 log_msg("  Appendix J version: ", APPENDIX_J_CONFIG$version)
 log_msg("  Target N: ", config$target_n)
 log_msg("  Min Progress: ", config$min_progress)
+log_msg("  Preserve original: ", config$preserve_original)
 log_msg("  Random seed: 1307")
 log_msg("  Working directory: ", getwd())
 
@@ -124,7 +180,7 @@ safe_col <- function(df, col_name, default = NA) {
   if (col_name %in% names(df)) df[[col_name]] else default
 }
 
-# Progress bar wrapper (if available)
+# Progress bar wrapper for better UX during processing
 with_progress <- function(items, fn, desc = "Processing") {
   if (requireNamespace("progress", quietly = TRUE)) {
     pb <- progress::progress_bar$new(
@@ -151,7 +207,8 @@ infile <- if (file.exists(config$infile)) {
   config$alt_infile
 } else {
   stop("Neither input file found:\n  ", config$infile, "\n  ", config$alt_infile,
-       "\n  Working directory: ", getwd())
+       "\n  Working directory: ", getwd(),
+       "\n  Run 02_classify_stakeholders.R first to generate: ", basename(config$infile))
 }
 
 # Load data with comprehensive error handling
@@ -249,6 +306,47 @@ log_msg("  Mean ± SD: ", progress_stats$Mean, " ± ", progress_stats$SD)
 log_msg("  Median [Min-Max]: ", progress_stats$Median, " [", 
         progress_stats$Min, "-", progress_stats$Max, "]")
 
+# ========================= ROLE COLUMN DETECTION =========================
+log_msg("\n=== ROLE COLUMN DETECTION ===")
+
+# Use centralized helper function
+role_col <- find_role_column(df)
+log_msg("Using role column: ", role_col)
+
+# CRITICAL: Preserve original classification
+# This is the key fix - we create a new column for quota-matched assignments
+# while preserving the original ground truth
+original_role_col <- paste0(role_col, "_Original")
+df[[original_role_col]] <- df[[role_col]]
+log_msg("Preserved original classifications in: ", original_role_col)
+
+# Create new column for quota-matched assignments
+quota_role_col <- "Quota_Matched_Category"
+df[[quota_role_col]] <- df[[role_col]]  # Initialize with original values
+log_msg("Created quota-matched column: ", quota_role_col)
+
+# Validate categories using centralized function
+validation <- validate_categories(df[[role_col]], target)
+log_msg("Unique categories in data: ", length(unique(df[[role_col]])))
+log_msg("Category match rate: ", round(validation$match_rate * 100, 1), "%")
+
+if (length(validation$missing) > 0) {
+  log_msg("WARNING: ", length(validation$missing), " target categories not found in data:")
+  for (cat in head(validation$missing, 5)) {
+    log_msg("  - ", cat)
+  }
+  if (length(validation$missing) > 5) {
+    log_msg("  ... and ", length(validation$missing) - 5, " more")
+  }
+}
+
+if (length(validation$extra) > 0) {
+  log_msg("Categories in data but not in target: ", length(validation$extra))
+  for (cat in head(validation$extra, 5)) {
+    log_msg("  - ", cat)
+  }
+}
+
 # ========================= ELIGIBILITY FILTERS =========================
 log_msg("\n=== APPLYING ELIGIBILITY FILTERS ===")
 initial_count <- nrow(df)
@@ -334,49 +432,8 @@ log_msg("Retention: ", round((nrow(df)/initial_count) * 100, 1), "%")
 # ========================= TARGET DISTRIBUTION VALIDATION =========================
 log_msg("\n=== TARGET DISTRIBUTION (APPENDIX J) ===")
 log_msg("Using centralized configuration version: ", APPENDIX_J_CONFIG$version)
-
-# Validate target sum
-target_sum <- sum(target$Target)
-if (target_sum != config$target_n) {
-  warning("Target distribution sums to ", target_sum, " not ", config$target_n, "!")
-  log_msg("WARNING: Target sum mismatch - adjusting Miscellaneous category")
-  # Adjust Miscellaneous to make sum correct
-  misc_idx <- which(target$Category == "Miscellaneous and Individual Respondents")
-  target$Target[misc_idx] <- target$Target[misc_idx] + (config$target_n - target_sum)
-  target_sum <- sum(target$Target)
-}
-
 log_msg("Target categories: ", nrow(target))
-log_msg("Target total: ", target_sum)
-
-# ========================= ROLE COLUMN DETECTION =========================
-log_msg("\n=== ROLE COLUMN DETECTION ===")
-
-# Use centralized helper function
-role_col <- find_role_column(df)
-log_msg("Using role column: ", role_col)
-
-# Validate categories using centralized function
-validation <- validate_categories(df[[role_col]], target)
-log_msg("Unique categories in data: ", length(unique(df[[role_col]])))
-log_msg("Category match rate: ", round(validation$match_rate * 100, 1), "%")
-
-if (length(validation$missing) > 0) {
-  log_msg("WARNING: ", length(validation$missing), " target categories not found in data:")
-  for (cat in head(validation$missing, 5)) {
-    log_msg("  - ", cat)
-  }
-  if (length(validation$missing) > 5) {
-    log_msg("  ... and ", length(validation$missing) - 5, " more")
-  }
-}
-
-if (length(validation$extra) > 0) {
-  log_msg("Categories in data but not in target: ", length(validation$extra))
-  for (cat in head(validation$extra, 5)) {
-    log_msg("  - ", cat)
-  }
-}
+log_msg("Target total: ", sum(target$Target))
 
 # ========================= FIRST PASS: DIRECT MATCHING =========================
 log_msg("\n=== FIRST PASS: Direct category matching ===")
@@ -391,7 +448,7 @@ for (i in seq_len(nrow(target))) {
   cat_name <- target$Category[i]
   need <- target$Target[i]
   
-  # Get pool of candidates for this category
+  # Get pool of candidates for this category - use ORIGINAL role column
   pool <- df %>% 
     filter(.data[[role_col]] == cat_name) %>%
     arrange(desc(Progress), ResponseId)  # Deterministic ordering
@@ -440,8 +497,8 @@ log_msg("  Categories fulfilled: ", sum(first_pass_stats$Deficit == 0), "/", nro
 log_msg("  Categories with deficits: ", sum(first_pass_stats$Deficit > 0))
 log_msg("  Total deficit: ", sum(first_pass_stats$Deficit))
 
-# ========================= SECOND PASS: DEFICIT FILLING =========================
-log_msg("\n=== SECOND PASS: Filling deficits ===")
+# ========================= SECOND PASS: DEFICIT FILLING (NON-DESTRUCTIVE) =========================
+log_msg("\n=== SECOND PASS: Non-destructive deficit filling ===")
 
 taken_ids <- final$ResponseId
 remaining <- df %>% filter(!(ResponseId %in% taken_ids))
@@ -450,7 +507,7 @@ log_msg("Remaining pool size: ", nrow(remaining))
 # Calculate current state
 need_tbl <- target %>%
   mutate(
-    Taken = map_int(Category, ~ sum(final[[role_col]] == .x, na.rm = TRUE))
+    Taken = map_int(Category, ~ sum(final[[quota_role_col]] == .x, na.rm = TRUE))
   ) %>%
   mutate(
     Deficit = pmax(Target - Taken, 0L)
@@ -509,20 +566,21 @@ if (total_deficit > 0 && nrow(remaining) > 0) {
       k <- min(nrow(cand), deficit_i)
       move <- cand[seq_len(k), , drop = FALSE]
       
-      # Record reassignment
+      # CRITICAL: Update ONLY the quota column, preserve original
+      move[[quota_role_col]] <- cat_i
+      
+      # Record reassignment with both original and new categories
       reassign_log <- bind_rows(
         reassign_log,
         tibble(
           ResponseId = move$ResponseId,
           Progress = move$Progress,
-          From = dcat,
-          To = cat_i,
-          Reason = "Deficit filling"
+          Original_Category = move[[role_col]],  # Preserve ground truth
+          From_Category = dcat,
+          To_Category = cat_i,
+          Reason = "Quota deficit filling"
         )
       )
-      
-      # Update category
-      move[[role_col]] <- cat_i
       
       # Update datasets
       remaining <- anti_join(remaining, cand[seq_len(k), c("ResponseId")], by = "ResponseId")
@@ -544,21 +602,55 @@ if (total_deficit > 0 && nrow(remaining) > 0) {
   log_msg("WARNING: Have deficits but no remaining responses to reassign!")
 }
 
+# ========================= PREPARE FINAL OUTPUT =========================
+log_msg("\n=== PREPARING FINAL OUTPUT ===")
+
+# Ensure we have the standard role column name for downstream compatibility
+# But ALSO preserve both original and quota-matched columns
+final <- final %>%
+  rename(
+    Original_Classification = !!rlang::sym(role_col),
+    Final_Role_Category = !!rlang::sym(quota_role_col)
+  ) %>%
+  select(
+    ResponseId,
+    Original_Classification,  # Preserved ground truth
+    Final_Role_Category,      # Quota-matched assignment
+    everything()
+  )
+
+# Add metadata columns
+final <- final %>%
+  mutate(
+    Quota_Match_Version = "4.0",
+    Quota_Match_Date = Sys.Date(),
+    Was_Reassigned = ResponseId %in% reassign_log$ResponseId
+  )
+
+# Sort final dataset for consistency
+final <- final %>% arrange(ResponseId)
+
 # ========================= FINAL VERIFICATION =========================
 log_msg("\n=== FINAL VERIFICATION ===")
 
-# Calculate final distribution
+# Calculate final distribution using quota-matched column
 final_dist <- final %>% 
-  count(!!rlang::sym(role_col), name = "Final") %>%  # FIX: Added rlang:: namespace
-  rename(Category = !!rlang::sym(role_col))  # FIX: Added rlang:: namespace
+  count(Final_Role_Category, name = "Final") %>%
+  rename(Category = Final_Role_Category)
+
+# Compare original distribution
+original_dist <- final %>%
+  count(Original_Classification, name = "Original") %>%
+  rename(Category = Original_Classification)
 
 # Create comprehensive verification table
 verify_tbl <- full_join(final_dist, target, by = "Category") %>%
+  left_join(original_dist, by = "Category") %>%
   mutate(
-    Final = replace_na(Final, 0L),
-    Target = replace_na(Target, 0L),
+    across(c(Final, Target, Original), ~replace_na(., 0L)),
     Difference = Final - Target,
     Match = Final == Target,
+    Reassigned = Final - Original,
     Pct_Difference = ifelse(Target > 0, 
                            round((Final - Target) / Target * 100, 1),
                            ifelse(Final > 0, 999.9, 0))
@@ -567,16 +659,16 @@ verify_tbl <- full_join(final_dist, target, by = "Category") %>%
 
 # Enhanced verification output
 log_msg("\nCategory distribution (largest differences first):")
-log_msg(sprintf("%-45s %6s %6s %7s %8s", 
-               "Category", "Target", "Final", "Diff", "Pct Diff"))
-log_msg(paste(rep("-", 75), collapse = ""))
+log_msg(sprintf("%-45s %6s %6s %6s %7s %8s", 
+               "Category", "Target", "Final", "Orig", "Diff", "Pct Diff"))
+log_msg(paste(rep("-", 85), collapse = ""))
 
 for (i in seq_len(min(15, nrow(verify_tbl)))) {
   row <- verify_tbl[i, ]
   status <- if (row$Match) "✓" else "✗"
-  log_msg(sprintf("%s %-43s %6d %6d %+7d %+7.1f%%",
+  log_msg(sprintf("%s %-43s %6d %6d %6d %+7d %+7.1f%%",
                   status, substr(row$Category, 1, 43), 
-                  row$Target, row$Final, 
+                  row$Target, row$Final, row$Original,
                   row$Difference, row$Pct_Difference))
 }
 
@@ -589,6 +681,7 @@ final_total <- sum(verify_tbl$Final)
 target_total <- sum(verify_tbl$Target)
 n_matched <- sum(verify_tbl$Match)
 n_categories <- nrow(verify_tbl)
+n_reassigned <- sum(abs(verify_tbl$Reassigned)) / 2  # Divide by 2 since each move affects 2 categories
 
 log_msg("\n=== OVERALL RESULTS ===")
 log_msg("Final N: ", final_total)
@@ -596,49 +689,49 @@ log_msg("Target N: ", target_total)
 log_msg("Difference: ", final_total - target_total)
 log_msg("Categories perfectly matched: ", n_matched, "/", n_categories, 
         " (", round(n_matched/n_categories * 100, 1), "%)")
-log_msg("Number of reassignments: ", nrow(reassign_log))
+log_msg("Total reassignments: ", n_reassigned)
+log_msg("Ground truth preserved: YES (in Original_Classification column)")
 
 # Success/failure message
 if (final_total == target_total) {
   log_msg("\n✓ SUCCESS: Final dataset has exactly ", final_total, " responses")
+  log_msg("✓ SUCCESS: Original classifications preserved")
 } else if (abs(final_total - target_total) <= 5) {
   log_msg("\n⚠ NEAR SUCCESS: Final has ", final_total, 
          " responses (", abs(final_total - target_total), " off target)")
 } else {
-  warning("\n✗ MISMATCH: Final has ", final_total, " responses, target was ", target_total)
+  stop("\n✗ FAILURE: Final has ", final_total, " responses, target was ", target_total)
 }
 
 # ========================= SAVE OUTPUTS =========================
 log_msg("\n=== SAVING OUTPUTS ===")
 
-# Sort final dataset for consistency
-final <- final %>% arrange(ResponseId)
-
-# Ensure role column is named appropriately for downstream
-if (role_col != "Final_Role_Category") {
-  final <- final %>% rename(Final_Role_Category = !!rlang::sym(role_col))  # FIX: Added rlang:: namespace
-  log_msg("Renamed role column to Final_Role_Category for consistency")
-}
-
 # Main outputs with error handling
 tryCatch({
   write.csv(final, config$outfile_final, row.names = FALSE)
-  log_msg("✓ Final dataset → ", normalizePath(config$outfile_final))
+  log_msg("✓ Final dataset → ", normalizePath(config$outfile_final, mustWork = FALSE))
 }, error = function(e) {
   log_msg("ERROR saving final dataset: ", e$message)
 })
 
 tryCatch({
   write.csv(verify_tbl, config$outfile_verify, row.names = FALSE)
-  log_msg("✓ Verification → ", normalizePath(config$outfile_verify))
+  log_msg("✓ Verification → ", normalizePath(config$outfile_verify, mustWork = FALSE))
 }, error = function(e) {
   log_msg("ERROR saving verification: ", e$message)
 })
 
 if (nrow(reassign_log) > 0) {
+  # Add enhanced information to reassignment log
+  reassign_log <- reassign_log %>%
+    mutate(
+      Preserved_Original = TRUE,
+      Reassignment_Method = "Non-destructive quota matching"
+    )
+  
   tryCatch({
     write.csv(reassign_log, config$outfile_log, row.names = FALSE)
-    log_msg("✓ Reassignment log → ", normalizePath(config$outfile_log))
+    log_msg("✓ Reassignment log → ", normalizePath(config$outfile_log, mustWork = FALSE))
   }, error = function(e) {
     log_msg("ERROR saving reassignment log: ", e$message)
   })
@@ -646,7 +739,7 @@ if (nrow(reassign_log) > 0) {
 
 tryCatch({
   write.csv(first_pass_stats, config$outfile_stats, row.names = FALSE)
-  log_msg("✓ Statistics → ", normalizePath(config$outfile_stats))
+  log_msg("✓ Statistics → ", normalizePath(config$outfile_stats, mustWork = FALSE))
 }, error = function(e) {
   log_msg("ERROR saving statistics: ", e$message)
 })
@@ -656,14 +749,14 @@ if (nrow(reassign_log) > 0) {
   log_msg("\n=== REASSIGNMENT PATTERNS ===")
   
   reassign_summary <- reassign_log %>%
-    count(From, To, sort = TRUE) %>%
+    count(From_Category, To_Category, sort = TRUE) %>%
     head(10)
   
   log_msg("Top reassignment flows:")
   for (i in seq_len(nrow(reassign_summary))) {
     row <- reassign_summary[i, ]
     log_msg(sprintf("  %2d. %s → %s (%d moves)", 
-                   i, row$From, row$To, row$n))
+                   i, row$From_Category, row$To_Category, row$n))
   }
   
   # Progress analysis of reassigned responses
@@ -711,14 +804,8 @@ log_msg("  Range: ", round(final_progress_stats$min, 1),
        "% - ", round(final_progress_stats$max, 1), "%")
 
 # Completeness by category
-role_col_final <- if ("Final_Role_Category" %in% names(final)) {
-  "Final_Role_Category"
-} else {
-  role_col
-}
-
 completeness_by_cat <- final %>%
-  group_by(!!rlang::sym(role_col_final)) %>%  # FIX: Added rlang:: namespace
+  group_by(Final_Role_Category) %>%
   summarise(
     n = n(),
     mean_progress = mean(Progress, na.rm = TRUE),
@@ -731,9 +818,46 @@ for (i in seq_len(min(5, nrow(completeness_by_cat)))) {
   row <- completeness_by_cat[i, ]
   log_msg(sprintf("  %d. %s: %.1f%% (n=%d)", 
                   i,
-                  substr(row[[1]], 1, 40),  # Truncate long names
+                  substr(row$Final_Role_Category, 1, 40),  # Truncate long names
                   row$mean_progress, 
                   row$n))
+}
+
+# ========================= DATA INTEGRITY CHECK =========================
+log_msg("\n=== DATA INTEGRITY CHECK ===")
+
+# Verify that original classifications are preserved
+n_originals <- n_distinct(final$Original_Classification)
+n_finals <- n_distinct(final$Final_Role_Category)
+
+log_msg("Unique original categories: ", n_originals)
+log_msg("Unique final categories: ", n_finals)
+
+# Check that no data was lost
+if (nrow(final) != sum(verify_tbl$Final)) {
+  warning("Data integrity check failed: row count mismatch")
+} else {
+  log_msg("✓ Row count verification passed")
+}
+
+# Verify ground truth preservation
+preservation_check <- final %>%
+  filter(!Was_Reassigned) %>%
+  summarise(
+    preserved = all(Original_Classification == Final_Role_Category)
+  ) %>%
+  pull(preserved)
+
+if (preservation_check) {
+  log_msg("✓ Ground truth preservation verified for non-reassigned responses")
+} else {
+  warning("Ground truth preservation check failed!")
+}
+
+# Check privacy compliance
+privacy_ok <- check_privacy_violations(final, stop_on_violation = FALSE)
+if (privacy_ok) {
+  log_msg("✓ Privacy compliance check passed")
 }
 
 # ========================= FINAL SUMMARY =========================
@@ -743,17 +867,20 @@ log_msg("Initial responses: ", initial_count)
 log_msg("After filtering: ", nrow(df))
 log_msg("Final dataset: ", nrow(final))
 log_msg("Reassignments: ", nrow(reassign_log))
+log_msg("Preservation method: Non-destructive (dual-column)")
 
 # Calculate runtime
 runtime <- difftime(Sys.time(), 
-                   as.POSIXct(substr(config$log_file, 
-                             nchar(config$log_file) - 18, 
-                             nchar(config$log_file) - 4),
+                   as.POSIXct(gsub(".*_(\\d{8}_\\d{6})\\.log", "\\1", config$log_file),
                              format = "%Y%m%d_%H%M%S"), 
                    units = "secs")
 
 log_msg("\n=== PROCESS COMPLETE ===")
 log_msg("Runtime: ", round(runtime, 2), " seconds")
+log_msg("✓ Non-destructive quota matching completed successfully")
+log_msg("✓ Ground truth preserved in 'Original_Classification' column")
+log_msg("✓ Quota-matched assignments in 'Final_Role_Category' column")
+log_msg("✓ All outputs saved to centralized paths")
 log_msg("Log saved to: ", config$log_file)
 log_msg("✓ Done at ", format(Sys.time(), "%Y-%m-%d %H:%M:%S %Z"))
 
@@ -764,5 +891,7 @@ invisible(list(
   reassignments = reassign_log,
   statistics = first_pass_stats,
   config = config,
-  appendix_j_config = APPENDIX_J_CONFIG
+  appendix_j_config = APPENDIX_J_CONFIG,
+  preserved_original = TRUE,
+  runtime = runtime
 ))

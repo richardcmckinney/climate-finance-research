@@ -5,35 +5,63 @@ if (!exists(".local", inherits = TRUE)) .local <- function(...) NULL
 
 # filter_and_adjust_classifications.R
 # Purpose: Report deficits vs Appendix J and propose a donor pool (audit utility)
-# Version: 2.0 - Updated to use centralized configuration
+# Version: 3.0 - Updated to use centralized configuration throughout
 # Author: Richard McKinney
-# Date: 2025-08-08
+# Date: 2025-08-09
 
-suppressPackageStartupMessages(library(tidyverse))
+suppressPackageStartupMessages({
+  library(tidyverse)
+  if (!requireNamespace("rlang", quietly = TRUE)) {
+    library(rlang)
+  }
+})
 
-# ========================= CONFIGURATION =========================
-# Source centralized Appendix J configuration
+# ========================= LOAD CENTRAL CONFIGURATION FIRST =========================
+# This MUST come before Appendix J config to ensure we have paths
 config_paths <- c(
-  "R/appendix_j_config.R",
-  "appendix_j_config.R",
-  "../R/appendix_j_config.R"
+  "R/00_config.R",
+  "00_config.R",
+  "../R/00_config.R"
 )
 
 config_loaded <- FALSE
 for (config_path in config_paths) {
   if (file.exists(config_path)) {
-    .appendix_j_config_silent <- TRUE  # Suppress loading message
     source(config_path)
     config_loaded <- TRUE
-    cat("Loaded configuration from: ", config_path, "\n")
+    cat("Loaded central configuration from:", config_path, "\n")
     break
   }
 }
 
 if (!config_loaded) {
-  stop("Could not find appendix_j_config.R in any of the expected locations:\n  ",
+  stop("Could not find 00_config.R in any of the expected locations:\n  ",
        paste(config_paths, collapse = "\n  "),
-       "\nPlease ensure the configuration file is in the correct location.")
+       "\nThis file is required for centralized path configuration.")
+}
+
+# ========================= LOAD APPENDIX J CONFIGURATION =========================
+# Source centralized Appendix J configuration
+appendix_j_paths <- c(
+  "R/appendix_j_config.R",
+  "appendix_j_config.R",
+  "../R/appendix_j_config.R"
+)
+
+appendix_j_loaded <- FALSE
+for (config_path in appendix_j_paths) {
+  if (file.exists(config_path)) {
+    .appendix_j_config_silent <- TRUE  # Suppress loading message
+    source(config_path)
+    appendix_j_loaded <- TRUE
+    cat("Loaded Appendix J configuration from:", config_path, "\n")
+    break
+  }
+}
+
+if (!appendix_j_loaded) {
+  stop("Could not find appendix_j_config.R in any of the expected locations:\n  ",
+       paste(appendix_j_paths, collapse = "\n  "))
 }
 
 # Get target distribution from centralized source
@@ -42,30 +70,50 @@ target <- get_appendix_j_target()
 # ========================= SETUP =========================
 dir.create("output", recursive = TRUE, showWarnings = FALSE)
 
-# Try multiple possible input files
-input_files <- c(
-  "data/climate_finance_survey_final_1307.csv",
-  "data/survey_responses_anonymized_preliminary.csv",
-  "data/climate_finance_survey_classified.csv"  # Legacy path
+# ========================= INPUT FILE SELECTION =========================
+# Use centralized paths instead of hardcoded strings
+# Priority order: final_1307 > preliminary_classified > basic_anon
+input_candidates <- list(
+  list(path = PATHS$final_1307, 
+       desc = "Final quota-matched dataset"),
+  list(path = PATHS$preliminary_classified, 
+       desc = "Preliminary classified dataset"),
+  list(path = PATHS$basic_anon, 
+       desc = "Basic anonymized dataset")
 )
 
 # Find first existing file
 infile <- NULL
-for (f in input_files) {
-  if (file.exists(f)) {
-    infile <- f
+infile_desc <- NULL
+for (candidate in input_candidates) {
+  if (file.exists(candidate$path)) {
+    infile <- candidate$path
+    infile_desc <- candidate$desc
     break
   }
 }
 
 if (is.null(infile)) {
-  stop("No input file found. Looked for:\n  ", paste(input_files, collapse = "\n  "))
+  stop("No input file found. Looked for:\n  ", 
+       paste(sapply(input_candidates, function(x) x$path), collapse = "\n  "),
+       "\nRun earlier pipeline stages first.")
 }
 
-cat("Using input file: ", infile, "\n")
+cat("Using input: ", infile_desc, "\n")
+cat("File: ", basename(infile), "\n")
 
 # ========================= DATA LOADING =========================
-df <- read.csv(infile, stringsAsFactors = FALSE)
+df <- tryCatch({
+  if (requireNamespace("readr", quietly = TRUE)) {
+    readr::read_csv(infile, show_col_types = FALSE, progress = FALSE)
+  } else {
+    read.csv(infile, stringsAsFactors = FALSE, check.names = FALSE)
+  }
+}, error = function(e) {
+  stop("Failed to read input file: ", e$message)
+})
+
+cat("Loaded ", nrow(df), " rows\n")
 
 # Ensure ResponseId exists
 if (!"ResponseId" %in% names(df)) {
@@ -77,57 +125,58 @@ if (!"ResponseId" %in% names(df)) {
 }
 
 # ========================= PROGRESS HANDLING =========================
-# Use helper function from config if available
+# Use helper function from config
 progress_col <- find_progress_column(df)
 
-if (!is.null(progress_col) && progress_col != "Progress") {
-  cat("Using progress column: ", progress_col, "\n")
-  df$Progress <- df[[progress_col]]
-} else if (is.null(progress_col)) {
-  # Handle missing Progress column
-  if ("Progress" %in% names(df)) {
-    # Already exists, just ensure it's numeric
-  } else {
-    cat("Warning: No Progress column found, using all rows\n")
-    df$Progress <- 100  # Assume complete if no progress column
+if (!is.null(progress_col)) {
+  if (progress_col != "Progress") {
+    cat("Using progress column:", progress_col, "\n")
+    df$Progress <- df[[progress_col]]
+  }
+} else {
+  if (!"Progress" %in% names(df)) {
+    cat("Warning: No Progress column found, assuming all complete\n")
+    df$Progress <- 100
   }
 }
 
-# Convert to numeric
+# Convert to numeric and normalize
 df$Progress <- suppressWarnings(as.numeric(df$Progress))
-
-# Handle percentage values (if Progress is 0-1, convert to 0-100)
 if (!all(is.na(df$Progress)) && max(df$Progress, na.rm = TRUE) <= 1) {
   cat("Converting Progress from decimal to percentage format\n")
   df$Progress <- df$Progress * 100
 }
-
-# Replace NA with 0
 df$Progress[is.na(df$Progress)] <- 0
 
 # ========================= FILTERING =========================
 # Apply minimum progress filter from config
-min_progress <- APPENDIX_J_CONFIG$min_progress
+min_progress <- QUALITY_PARAMS$min_progress
 
-if ("Progress" %in% names(df)) {
-  df_complete <- dplyr::filter(df, Progress >= min_progress)
-  cat("Filtered to ", nrow(df_complete), " responses with Progress >= ", min_progress, "\n")
-} else {
-  df_complete <- df
-}
+df_complete <- df %>% 
+  filter(Progress >= min_progress)
+
+cat("Filtered to", nrow(df_complete), "responses with Progress >=", min_progress, "\n")
 
 # ========================= ROLE COLUMN DETECTION =========================
 # Use helper function from config
 role_col <- find_role_column(df_complete)
-cat("Using role column: ", role_col, "\n")
+cat("Using role column:", role_col, "\n")
+
+# Check for non-destructive quota matching
+if (all(c("Original_Classification", "Final_Role_Category") %in% names(df_complete))) {
+  cat("\nNon-destructive quota matching detected:\n")
+  cat("  Analyzing quota-matched assignments (Final_Role_Category)\n")
+  cat("  Original classifications available in Original_Classification\n")
+  role_col <- "Final_Role_Category"  # Use quota-matched for deficit analysis
+}
 
 # Validate categories
 validation <- validate_categories(df_complete[[role_col]], target)
 if (length(validation$missing) > 0) {
-  cat("Warning: ", length(validation$missing), " target categories not found in data\n")
+  cat("Warning:", length(validation$missing), "target categories not found in data\n")
   if (length(validation$missing) <= 5) {
     for (cat in validation$missing) {
-      cat("  - ", cat, "\n")
+      cat("  -", cat, "\n")
     }
   }
 }
@@ -135,8 +184,8 @@ if (length(validation$missing) > 0) {
 # ========================= ANALYSIS =========================
 # Calculate current distribution
 curr <- df_complete %>% 
-  count(.data[[role_col]], name = "Current") %>% 
-  rename(Category = !!rlang::sym(role_col))  # FIX: Added rlang:: namespace
+  count(!!rlang::sym(role_col), name = "Current") %>% 
+  rename(Category = !!rlang::sym(role_col))
 
 # Compare with target
 cmp <- full_join(curr, target, by = "Category") %>%
@@ -176,6 +225,7 @@ summary_stats <- data.frame(
     "Match Rate (%)",
     "Mean Progress (%)",
     "Input File",
+    "Role Column Used",
     "Analysis Date"
   ),
   Value = c(
@@ -190,6 +240,7 @@ summary_stats <- data.frame(
     round(100 * categories_matched / categories_total, 1),
     round(mean(df_complete$Progress, na.rm = TRUE), 1),
     basename(infile),
+    role_col,
     as.character(Sys.Date())
   )
 )
@@ -205,21 +256,29 @@ donor_pool <- cmp %>%
   )
 
 # ========================= SAVE OUTPUTS =========================
-write.csv(cmp, "output/classification_deficit_report.csv", row.names = FALSE)
-write.csv(summary_stats, "output/classification_summary_stats.csv", row.names = FALSE)
-write.csv(donor_pool, "output/donor_pool_analysis.csv", row.names = FALSE)
+# Use centralized paths where defined, create new ones for this script's specific outputs
+output_files <- list(
+  deficit_report = "output/classification_deficit_report.csv",
+  summary_stats = "output/classification_summary_stats.csv",
+  donor_pool = "output/donor_pool_analysis.csv"
+)
+
+write.csv(cmp, output_files$deficit_report, row.names = FALSE)
+write.csv(summary_stats, output_files$summary_stats, row.names = FALSE)
+write.csv(donor_pool, output_files$donor_pool, row.names = FALSE)
 
 # ========================= CONSOLE OUTPUT =========================
 cat("\n=== CLASSIFICATION DEFICIT REPORT ===\n")
 cat("Configuration: Appendix J v", APPENDIX_J_CONFIG$version, "\n")
-cat("Input: ", basename(infile), "\n")
-cat("Total responses: ", total_current, " (Target: ", total_target, ")\n", sep = "")
-cat("Difference: ", ifelse(total_current >= total_target, "+", ""), 
+cat("Input:", infile_desc, "\n")
+cat("File:", basename(infile), "\n")
+cat("Total responses:", total_current, "(Target:", total_target, ")\n")
+cat("Difference:", ifelse(total_current >= total_target, "+", ""), 
     total_current - total_target, "\n", sep = "")
-cat("Categories matched: ", categories_matched, "/", categories_total, 
-    " (", round(100 * categories_matched / categories_total, 1), "%)\n", sep = "")
-cat("Total deficit to fill: ", total_deficit, "\n", sep = "")
-cat("Total surplus available: ", total_surplus, "\n", sep = "")
+cat("Categories matched:", categories_matched, "/", categories_total, 
+    "(", round(100 * categories_matched / categories_total, 1), "%)\n", sep = "")
+cat("Total deficit to fill:", total_deficit, "\n")
+cat("Total surplus available:", total_surplus, "\n")
 
 if (nrow(donor_pool) > 0) {
   cat("\nTop donor categories (with surplus):\n")
@@ -230,9 +289,9 @@ if (nrow(donor_pool) > 0) {
 }
 
 cat("\nReports saved:\n")
-cat("  → output/classification_deficit_report.csv\n")
-cat("  → output/classification_summary_stats.csv\n")
-cat("  → output/donor_pool_analysis.csv\n")
+for (name in names(output_files)) {
+  cat("  →", output_files[[name]], "\n")
+}
 
 # ========================= VISUALIZATION (Optional) =========================
 # Create a simple text-based visualization if requested
@@ -269,5 +328,7 @@ invisible(list(
   summary = summary_stats,
   donor_pool = donor_pool,
   config = APPENDIX_J_CONFIG,
-  validation = validation
+  validation = validation,
+  input_file = infile,
+  role_column = role_col
 ))

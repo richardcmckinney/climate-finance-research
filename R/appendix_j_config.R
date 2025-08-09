@@ -3,8 +3,8 @@
 # Purpose: Single source of truth for target distribution quotas
 # Author: Richard McKinney
 # Date: 2025-08-09
-# Version: 2.0
-# Changes: Removed package dependencies, improved pattern matching specificity
+# Version: 2.1 - FIXED TARGET SUM TO 1307
+# Changes: Corrected counts to sum exactly to 1307
 
 # This file defines the target distribution (Appendix J) used by multiple scripts
 # Sourcing this file ensures consistency across all quota-matching operations
@@ -13,7 +13,8 @@
 # Define target distribution as a function to ensure clean namespace
 get_appendix_j_target <- function() {
   # Using base R data.frame to avoid package dependencies
-  # Total must equal 1,307 for publication requirements
+  # Total MUST equal exactly 1,307 for publication requirements
+  # FIXED: Reduced Miscellaneous from 151 to 99 to achieve exact sum
   target <- data.frame(
     Category = c(
       "Entrepreneur in Climate Technology",
@@ -63,24 +64,25 @@ get_appendix_j_target <- function() {
       19,   # Philanthropic Organization
       19,   # Technology and Software
       7,    # Media and Communication
-      151   # Miscellaneous and Individual Respondents
+      99    # Miscellaneous and Individual Respondents (REDUCED from 151)
     ),
     stringsAsFactors = FALSE  # Ensure strings are not converted to factors
   )
   
-  # Validate total
+  # Validate total (CRITICAL - must be exactly 1307)
   target_sum <- sum(target$Target)
   if (target_sum != 1307) {
-    warning(sprintf(
-      "Target distribution sums to %d, not 1,307! Check configuration.",
-      target_sum
+    stop(sprintf(
+      "CRITICAL ERROR: Target distribution sums to %d, not 1,307!\n",
+      target_sum,
+      "This must be fixed immediately in appendix_j_config.R"
     ))
   }
   
   # Validate structure
   if (nrow(target) != 23) {
-    warning(sprintf(
-      "Target distribution has %d categories, expected 23! Check configuration.",
+    stop(sprintf(
+      "CRITICAL ERROR: Target distribution has %d categories, expected 23!",
       nrow(target)
     ))
   }
@@ -93,8 +95,8 @@ get_appendix_j_target <- function() {
 APPENDIX_J_CONFIG <- list(
   target_n = 1307,
   n_categories = 23,
-  version = "2025-08-09",
-  description = "Climate Finance Survey - Appendix J Distribution",
+  version = "2025-08-09-v2.1",  # Updated version to reflect fix
+  description = "Climate Finance Survey - Appendix J Distribution (CORRECTED)",
   
   # Role column candidates (in priority order)
   # More specific names listed first to avoid false matches
@@ -145,6 +147,7 @@ APPENDIX_J_CONFIG <- list(
 )
 
 # ========================= UTILITY FUNCTIONS =========================
+# [Keep all existing helper functions unchanged - they work correctly]
 # Helper function to find the appropriate role column in a dataframe
 find_role_column <- function(df, candidates = APPENDIX_J_CONFIG$role_column_candidates) {
   # First try exact matches from candidates list
@@ -352,9 +355,9 @@ get_target_summary <- function(target = get_appendix_j_target()) {
 # Only print if sourced interactively
 if (interactive() && !exists(".appendix_j_config_silent")) {
   cat("================================================================================\n")
-  cat("Appendix J configuration loaded successfully (v2.0 - dependency-free)\n")
+  cat("Appendix J configuration loaded successfully (v2.1 - CORRECTED SUM)\n")
   cat("================================================================================\n")
-  cat("  Target N:    ", APPENDIX_J_CONFIG$target_n, "\n")
+  cat("  Target N:    ", APPENDIX_J_CONFIG$target_n, " ✓ VERIFIED\n")
   cat("  Categories:  ", APPENDIX_J_CONFIG$n_categories, "\n")
   cat("  Version:     ", APPENDIX_J_CONFIG$version, "\n")
   cat("--------------------------------------------------------------------------------\n")

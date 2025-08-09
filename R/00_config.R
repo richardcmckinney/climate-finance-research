@@ -319,10 +319,13 @@ QUALITY_PARAMS <- list(
   min_progress = 10,              # Minimum progress for inclusion
   min_group_size = 10,            # Minimum group size for analysis
   max_missing_pct = 20,           # Maximum missing data percentage
-  target_n = 1307,                # Target sample size
+  # REMOVED: target_n = 1307,     # Now only in appendix_j_config.R
   confidence_level = 0.95,        # Confidence level for intervals
   significance_level = 0.05       # Significance level for tests
 )
+
+# Note: target_n is now exclusively defined in appendix_j_config.R as APPENDIX_J_CONFIG$target_n
+# This ensures a single source of truth for the target sample size
 
 # =============================================================================
 # ERROR HANDLING CONFIGURATION
@@ -365,7 +368,12 @@ if (!exists(".config_00_initialized", envir = .GlobalEnv)) {
     message("Run check_deprecated() for details.")
   } else {
     message("Master configuration (00_config.R) loaded successfully.")
-    message(sprintf("  Target N: %d", QUALITY_PARAMS$target_n))
+    # Reference from appendix_j_config.R instead
+if (exists("APPENDIX_J_CONFIG")) {
+  message(sprintf("  Target N: %d", APPENDIX_J_CONFIG$target_n))
+} else {
+  message("  Target N: (defined in appendix_j_config.R)")
+}
     message(sprintf("  Pipeline paths configured: %d", length(PATHS)))
     message(sprintf("  Quality parameters set: %d", length(QUALITY_PARAMS)))
   }
