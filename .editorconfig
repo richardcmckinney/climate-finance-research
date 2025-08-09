@@ -1,0 +1,214 @@
+# ===========================================
+# EditorConfig for Climate Finance Research Pipeline
+# Version 4.0 - With Purpose Documentation
+# https://editorconfig.org
+# ===========================================
+#
+# PURPOSE:
+# This .editorconfig file ensures consistent code formatting across all
+# contributors, regardless of their text editor or IDE. It addresses several
+# critical needs for research reproducibility:
+#
+# 1. CONSISTENCY ACROSS TEAMS:
+#    - Enforces uniform indentation (2 spaces for R code)
+#    - Standardizes line endings (LF) across Windows/Mac/Linux
+#    - Ensures files end with newlines (Git best practice)
+#    - Removes trailing whitespace that can cause diff noise
+#
+# 2. R-SPECIFIC CONVENTIONS:
+#    - Maintains R style guide compliance (2-space indentation)
+#    - Sets appropriate line length limits (100 chars for code)
+#    - Preserves data file integrity (no modification to CSVs)
+#
+# 3. REPRODUCIBILITY BENEFITS:
+#    - Prevents platform-specific formatting issues
+#    - Reduces merge conflicts from formatting differences
+#    - Makes code reviews focus on logic, not style
+#    - Ensures clean Git history without formatting commits
+#
+# 4. DATA INTEGRITY:
+#    - CSV files preserve exact formatting (no trim/newline)
+#    - Markdown maintains intentional line breaks
+#    - Data files remain byte-for-byte identical
+#
+# HOW IT WORKS:
+# - Supported editors auto-read this file (VSCode, RStudio, Sublime, etc.)
+# - Settings apply automatically when you open project files
+# - No manual configuration needed after initial setup
+# - Overrides personal editor preferences for project consistency
+#
+# SUPPORTED EDITORS:
+# - RStudio (with EditorConfig plugin)
+# - Visual Studio Code (native support)
+# - Sublime Text (with plugin)
+# - Atom, Vim, Emacs, IntelliJ, and many others
+#
+# TO VERIFY IT'S WORKING:
+# 1. Open any .R file in the project
+# 2. Check that tabs convert to 2 spaces
+# 3. Save a file and verify trailing spaces are removed
+# 4. Confirm line endings are LF (not CRLF on Windows)
+#
+# ===========================================
+
+# This is the top-most .editorconfig file
+root = true
+
+# ---------------------------------------------
+# Default settings for all files
+# Applied unless overridden by specific patterns below
+# ---------------------------------------------
+[*]
+charset = utf-8                    # Use UTF-8 encoding for all files
+end_of_line = lf                  # Unix-style line endings (critical for Git)
+insert_final_newline = true       # POSIX compliance, Git best practice
+trim_trailing_whitespace = true   # Remove unnecessary whitespace
+indent_style = space              # Spaces over tabs for consistency
+indent_size = 2                   # Default 2-space indentation
+
+# ---------------------------------------------
+# R Scripts - Core Pipeline Files
+# Follow tidyverse style guide conventions
+# ---------------------------------------------
+[*.{R,r}]
+indent_size = 2                   # R community standard
+max_line_length = 100             # Comfortable for side-by-side viewing
+# Note for developers: Use <- for assignment (not =)
+# This is R convention but not enforced by EditorConfig
+
+[*.{Rmd,rmd}]
+indent_size = 2                   # Match R script indentation
+max_line_length = 80              # Better for rendered output
+trim_trailing_whitespace = false  # Preserve intentional line breaks
+
+# ---------------------------------------------
+# Data Files - PRESERVE EXACT FORMATTING
+# Critical for reproducibility and checksums
+# ---------------------------------------------
+[*.{csv,tsv}]
+trim_trailing_whitespace = false  # Don't modify data files
+insert_final_newline = false      # Preserve exact file structure
+# Data integrity is paramount - no automatic changes
+
+[*.{json,geojson}]
+indent_size = 2                   # Standard JSON formatting
+max_line_length = 200             # Allow longer lines for data
+
+# ---------------------------------------------
+# Documentation Files
+# Balance readability with version control
+# ---------------------------------------------
+[*.md]
+indent_size = 2                   # Markdown standard
+max_line_length = 80              # Traditional documentation width
+trim_trailing_whitespace = false  # Preserve markdown line breaks
+
+[*.{txt,text}]
+indent_size = 2
+trim_trailing_whitespace = true
+
+[README.md]
+max_line_length = 120             # Allow longer lines for main README
+# README may contain tables that need more width
+
+# ---------------------------------------------
+# Configuration Files
+# Project setup and dependency management
+# ---------------------------------------------
+[*.{yml,yaml}]
+indent_size = 2                   # YAML standard
+max_line_length = 80
+
+[.gitignore]
+indent_size = 2
+max_line_length = 100             # Allow longer patterns
+
+[.editorconfig]
+indent_size = 2
+max_line_length = 100
+
+[renv.lock]
+indent_size = 2                   # renv default format
+insert_final_newline = true
+# Don't edit manually - use renv::snapshot()
+
+# ---------------------------------------------
+# Shell Scripts (if any)
+# For automation or setup scripts
+# ---------------------------------------------
+[*.{sh,bash}]
+indent_size = 4                   # Shell script convention
+max_line_length = 100
+
+# ---------------------------------------------
+# Makefiles - MUST USE TABS
+# Make requires tabs, not spaces
+# ---------------------------------------------
+[Makefile]
+indent_style = tab                # Required by Make
+indent_size = 4
+
+[*.mk]
+indent_style = tab
+indent_size = 4
+
+# ---------------------------------------------
+# HTML/Web Files (for reports/outputs)
+# ---------------------------------------------
+[*.{html,htm}]
+indent_size = 2
+max_line_length = 120             # HTML can have long lines
+
+[*.{css,scss,sass}]
+indent_size = 2
+max_line_length = 100
+
+[*.js]
+indent_size = 2
+max_line_length = 100
+
+# ---------------------------------------------
+# XML and Related
+# For any structured data exports
+# ---------------------------------------------
+[*.{xml,xsd,xsl}]
+indent_size = 2
+max_line_length = 120
+
+# ---------------------------------------------
+# License and Legal Files
+# Preserve standard formatting
+# ---------------------------------------------
+[LICENSE]
+insert_final_newline = false      # Preserve standard license format
+trim_trailing_whitespace = true
+max_line_length = 80
+
+[COPYING]
+insert_final_newline = false
+trim_trailing_whitespace = true
+max_line_length = 80
+
+# ---------------------------------------------
+# Special R Project Files
+# RStudio project configuration
+# ---------------------------------------------
+[*.Rproj]
+indent_size = 2
+trim_trailing_whitespace = true
+# Don't commit .Rproj unless team uses RStudio
+
+[.Rprofile]
+indent_size = 2
+max_line_length = 100
+# Project-specific R initialization
+
+[.Renviron]
+indent_size = 2
+max_line_length = 100
+# WARNING: Never commit .Renviron with secrets/API keys!
+
+# ---------------------------------------------
+# End of .editorconfig
+# Consistency in code = Reproducibility in research
+# ---------------------------------------------

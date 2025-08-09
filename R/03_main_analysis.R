@@ -1,431 +1,619 @@
 #!/usr/bin/env Rscript
 # 03_main_analysis.R
 # Purpose: Main statistical analysis for climate finance manuscript (FINAL N=1,307)
-# Version: 3.0 - CRITICAL FIX: Use quota_target_category for valid N=1,307 analysis
+# Version: 4.0 - COMPREHENSIVE REWRITE with all critical fixes
 # Author: Richard McKinney
 # Date: 2025-08-09
 #
-# CRITICAL CHANGES IN v3.0:
-# - Uses ANALYSIS_ROLE_COLUMN from 02_main_analysis.R (quota_target_category for N=1,307)
-# - Removed redundant pick_role_col() - uses centralized detect_role_column()
-# - Fixed all rlang namespace issues
-# - Ensures all analyses use the correct quota-matched categories
-# - Added validation that we're analyzing the right column throughout
+# CRITICAL FIXES IN v4.0:
+# 1. PRIVACY: Strict protection against using raw Q2.2 geographic data
+# 2. SEED: Uses PIPELINE_SEED from config, not hardcoded value
+# 3. WRITE_CSV: All calls include na="" parameter
+# 4. STANDALONE: Robust fallback detection for independent execution
+# 5. VALIDATION: Enhanced checks for data integrity and column availability
 #
 # Notes:
-#   - Deterministic: sets seed + UTC
-#   - Uses anonymized geographic data (hq_country/region) instead of raw Q2.2
+#   - Deterministic: uses PIPELINE_SEED + UTC
+#   - NEVER uses raw Q2.2 data - only anonymized geographic columns
 #   - Outputs comprehensive figures and diagnostic CSVs for manuscript
+#   - Can run standalone or as part of pipeline
 
-# ---- Safety for Rscript/S4 (.local) ------------------------------------------
+# ---- Environment Setup -------------------------------------------------------
 suppressPackageStartupMessages(library(methods))
 if (!exists(".local", inherits = TRUE)) .local <- function(...) NULL
 
-# ---- Determinism & options ---------------------------------------------------
-set.seed(1307)
+# ---- Load Configuration FIRST ------------------------------------------------
+config_paths <- c("R/00_config.R", "00_config.R", "../R/00_config.R")
+config_loaded <- FALSE
+
+for (config_path in config_paths) {
+  if (file.exists(config_path)) {
+    source(config_path)
+    config_loaded <- TRUE
+    message("✓ Loaded configuration from: ", config_path)
+    break
+  }
+}
+
+if (!config_loaded) {
+  stop("CRITICAL: Cannot find configuration file (00_config.R). ",
+       "This file is required for proper pipeline execution.")
+}
+
+# ---- Determinism Setup (USING PIPELINE_SEED) --------------------------------
+if (exists("PIPELINE_SEED")) {
+  set.seed(PIPELINE_SEED)
+  cat("✓ Using PIPELINE_SEED =", PIPELINE_SEED, "\n")
+} else {
+  # This should never happen if config loaded properly
+  stop("PIPELINE_SEED not found in configuration. Check 00_config.R")
+}
+
 Sys.setenv(TZ = "UTC")
-options(stringsAsFactors = FALSE)
+options(
+  stringsAsFactors = FALSE,
+  scipen = 999,  # Avoid scientific notation
+  width = 120    # Wider console output
+)
 
 # ---- Libraries ---------------------------------------------------------------
 suppressPackageStartupMessages({
-  library(tidyverse)  # includes readr, dplyr, tidyr, ggplot2, etc.
+  library(tidyverse)
   library(scales)
-  library(rlang)      # Explicitly load for tidy evaluation
+  library(rlang)
+  library(cli)      # Better console output
+  library(glue)     # String interpolation
 })
 
-# ---- Configuration ------------------------------------------------------------
-# Source configuration if available
-if (file.exists("R/00_config.R")) {
-  source("R/00_config.R")
-  INPUT_FINAL <- PATHS$final_1307
-} else if (file.exists("00_config.R")) {
-  source("00_config.R")
-  INPUT_FINAL <- PATHS$final_1307
-} else {
-  # Fallback for standalone execution
-  INPUT_FINAL <- "data/climate_finance_survey_final_1307.csv"
-  warning("Configuration file not found, using default path: ", INPUT_FINAL)
+# ---- Configuration & Parameters ----------------------------------------------
+VERBOSE <- TRUE
+SAVE_DIAGNOSTICS <- TRUE
+MIN_GROUP_SIZE <- 10  # Minimum n for group analyses
+
+# ---- Helper Functions --------------------------------------------------------
+# Enhanced console output with cli
+inf <- function(...) if (VERBOSE) cli_inform(paste0(...))
+
+# Ensure directory exists
+ensure_dir <- function(d) {
+  if (!dir.exists(d)) {
+    dir.create(d, recursive = TRUE, showWarnings = FALSE)
+    cli_inform("Created directory: {.path {d}}")
+  }
 }
 
-# CRITICAL: Get the analysis role column from 02_main_analysis.R
-if (!exists("ANALYSIS_ROLE_COLUMN")) {
-  # If run directly without wrapper, try to detect
-  warning("ANALYSIS_ROLE_COLUMN not set by wrapper. Attempting detection...")
-  ANALYSIS_ROLE_COLUMN <- NULL
+# Enhanced plot saving with validation
+save_plot <- function(path, plot, width = 10, height = 6, dpi = 300) {
+  tryCatch({
+    ggsave(path, plot, width = width, height = height, dpi = dpi)
+    cli_success("Saved plot: {.file {basename(path)}}")
+  }, error = function(e) {
+    cli_warn("Failed to save plot {basename(path)}: {e$message}")
+  })
 }
 
-VERBOSE <- TRUE            # rich console logging for reviewers
-SAVE_DIAGNOSTICS <- TRUE   # write extra CSVs used in the paper's methods/appendix
-
-# ---- Helpers -----------------------------------------------------------------
-inf <- function(...) if (VERBOSE) cat(paste0(...), "\n")
-ensure_dir <- function(d) if (!dir.exists(d)) dir.create(d, recursive = TRUE, showWarnings = FALSE)
-save_plot <- function(path, plot, width, height, dpi = 300) {
-  ggsave(path, plot, width = width, height = height, dpi = dpi)
-  inf("✓ Saved plot: ", path)
-}
+# Enhanced CSV saving with proper NA handling
 save_csv <- function(df, path) {
-  readr::write_csv(df, path)
-  inf("✓ Saved CSV: ", path)
+  tryCatch({
+    readr::write_csv(df, path, na = "")  # CRITICAL: Always include na parameter
+    cli_success("Saved CSV: {.file {basename(path)}} ({nrow(df)} rows)")
+  }, error = function(e) {
+    cli_warn("Failed to save CSV {basename(path)}: {e$message}")
+  })
 }
 
-# ---- Folders -----------------------------------------------------------------
+# ---- Create Output Directories -----------------------------------------------
 ensure_dir("figures")
 ensure_dir("output")
 
-# ---- Theme & palette ----------------------------------------------------------
+# ---- Theme Configuration -----------------------------------------------------
 theme_set(theme_minimal(base_size = 12))
 climate_colors <- c("#2E7D32", "#1976D2", "#F57C00", "#7B1FA2", "#C62828",
                     "#00796B", "#5D4037", "#455A64")
 
-# ---- Load FINAL dataset (post-quota match) -----------------------------------
-if (!file.exists(INPUT_FINAL)) {
-  stop("Final analysis dataset not found at: ", INPUT_FINAL,
-       "\nRun `R/get_exact_1307.R` (or `run_all.R --with-analysis`) first.")
+# ---- Data Loading with Robust Fallback ---------------------------------------
+cli_h1("Loading Data")
+
+# Check if data already loaded by wrapper
+if (!exists("df")) {
+  cli_warn("Dataset not loaded from wrapper. Attempting standalone execution...")
+  
+  if (!exists("PATHS") || !file.exists(PATHS$final_1307)) {
+    cli_abort(c(
+      "Cannot run standalone: final dataset not found",
+      "x" = "Expected at: {PATHS$final_1307}",
+      "i" = "Run the complete pipeline first: Rscript R/00_run_all.R"
+    ))
+  }
+  
+  df <- readr::read_csv(PATHS$final_1307, show_col_types = FALSE, progress = FALSE)
+  cli_success("Loaded {nrow(df)} rows from {.file {basename(PATHS$final_1307)}}")
 }
 
-# Use readr for consistency
-df <- readr::read_csv(INPUT_FINAL, show_col_types = FALSE, progress = FALSE)
+# ---- CRITICAL: Determine Analysis Role Column --------------------------------
+cli_h2("Determining Analysis Column")
 
-inf("Loaded FINAL dataset:\n  File: ", INPUT_FINAL,
-    "\n  Rows: ", nrow(df), "\n  Cols: ", ncol(df), "\n")
-
-# ---- CRITICAL: Determine correct role column for analysis -------------------
-if (is.null(ANALYSIS_ROLE_COLUMN)) {
-  # Detect the role column if not passed from wrapper
-  if ("quota_target_category" %in% names(df)) {
-    ANALYSIS_ROLE_COLUMN <- "quota_target_category"
-    inf("✓ CRITICAL: Detected quota-matched dataset, using 'quota_target_category' for analysis")
-  } else if ("Final_Role_Category" %in% names(df)) {
-    ANALYSIS_ROLE_COLUMN <- "Final_Role_Category"
-    inf("⚠ Using 'Final_Role_Category' (dataset may not be quota-matched)")
-  } else if (exists("detect_role_column") && is.function(detect_role_column)) {
-    ANALYSIS_ROLE_COLUMN <- detect_role_column(df)
-    inf("⚠ Using detected role column: ", ANALYSIS_ROLE_COLUMN)
-  } else {
-    # Final fallback
-    cand <- c("quota_target_category", "Final_Role_Category", 
-              "final_category_appendix_j", "stakeholder_category")
-    hit <- cand[cand %in% names(df)][1]
-    if (is.na(hit)) {
-      stop("No role category column found. Expected one of: ", paste(cand, collapse = ", "))
+if (!exists("ANALYSIS_ROLE_COLUMN")) {
+  # Strict priority order for standalone mode
+  candidates <- list(
+    quota = "quota_target_category",
+    final = "Final_Role_Category",
+    fallback = "stakeholder_category"
+  )
+  
+  ANALYSIS_ROLE_COLUMN <- NULL
+  
+  for (type in names(candidates)) {
+    col <- candidates[[type]]
+    if (col %in% names(df)) {
+      ANALYSIS_ROLE_COLUMN <- col
+      
+      if (type == "quota") {
+        cli_success("Using quota-matched categories: {.field {col}}")
+      } else if (type == "final") {
+        cli_warn("Using preliminary categories (may not be quota-matched): {.field {col}}")
+      } else {
+        cli_warn("Using fallback categories: {.field {col}}")
+      }
+      break
     }
-    ANALYSIS_ROLE_COLUMN <- hit
-    inf("⚠ Using fallback role column: ", ANALYSIS_ROLE_COLUMN)
+  }
+  
+  if (is.null(ANALYSIS_ROLE_COLUMN)) {
+    cli_abort(c(
+      "No valid role category column found",
+      "x" = "Checked for: {paste(unlist(candidates), collapse = ', ')}",
+      "i" = "Available columns: {paste(head(names(df), 10), collapse = ', ')}"
+    ))
   }
 }
 
-inf("\n=== ANALYSIS CONFIGURATION ===")
-inf("Role column for analysis: ", ANALYSIS_ROLE_COLUMN)
-inf("This column will be used for ALL stakeholder-based analyses\n")
+cli_inform("Analysis will use: {.strong {ANALYSIS_ROLE_COLUMN}}")
 
-# Validate the column exists and has data
-if (!ANALYSIS_ROLE_COLUMN %in% names(df)) {
-  stop("Critical error: Analysis role column '", ANALYSIS_ROLE_COLUMN, "' not found in dataset")
-}
-
+# Validate the column
 n_valid <- sum(!is.na(df[[ANALYSIS_ROLE_COLUMN]]))
-if (n_valid < 1000) {
-  warning("Only ", n_valid, " valid role categories found. Expected ~1,307")
+if (n_valid != 1307) {
+  cli_warn("Found {n_valid} valid role categories (expected 1,307)")
 }
 
-# ---- Data preparation with correct role column -------------------------------
-# Rename the analysis column to a standard name for consistency
-df <- df %>%
+# ---- Data Preparation --------------------------------------------------------
+cli_h1("Data Preparation")
+
+# Create analysis dataframe with standardized column name
+df_analysis <- df %>%
   rename(RoleCategory = !!sym(ANALYSIS_ROLE_COLUMN))
 
-# Make it an ordered factor by size for better visualization
-df <- df %>%
-  mutate(RoleCategory = if (!is.factor(RoleCategory)) factor(RoleCategory) else RoleCategory) %>%
-  group_by(RoleCategory) %>%
-  mutate(.role_n = n()) %>%
-  ungroup() %>%
-  mutate(RoleCategory = fct_reorder(RoleCategory, .role_n, .desc = TRUE)) %>%
-  select(-.role_n)
+# Convert to ordered factor by frequency
+df_analysis <- df_analysis %>%
+  mutate(RoleCategory = if_else(is.na(RoleCategory), "Unclassified", as.character(RoleCategory))) %>%
+  mutate(RoleCategory = fct_infreq(factor(RoleCategory)))
 
-# Save dataset schema for documentation
+# Prepare numeric versions of key variables
+if ("Q3.3" %in% names(df_analysis)) {
+  df_analysis <- df_analysis %>%
+    mutate(Q3_3_num = suppressWarnings(as.numeric(Q3.3)))
+}
+
+# Save data schema for documentation
 if (SAVE_DIAGNOSTICS) {
-  schema <- tibble::tibble(
-    variable   = names(df),
-    class      = vapply(df, function(x) class(x)[1], character(1)),
-    n_missing  = vapply(df, function(x) sum(is.na(x)), integer(1))
+  schema <- tibble(
+    variable = names(df_analysis),
+    class = map_chr(df_analysis, ~class(.x)[1]),
+    n_missing = map_int(df_analysis, ~sum(is.na(.x))),
+    pct_missing = round(n_missing / nrow(df_analysis) * 100, 1)
   )
-  save_csv(schema, "output/dataset_schema_snapshot.csv")
   
-  # Also save which column was used for analysis
-  analysis_config <- tibble::tibble(
-    parameter = c("input_file", "analysis_role_column", "n_rows", "n_valid_roles"),
-    value = c(INPUT_FINAL, ANALYSIS_ROLE_COLUMN, nrow(df), n_valid)
+  save_csv(schema, "output/dataset_schema.csv")
+  
+  # Save analysis configuration
+  config_info <- tibble(
+    parameter = c("input_file", "analysis_role_column", "n_rows", "n_valid_roles", "seed", "timestamp"),
+    value = c(
+      basename(PATHS$final_1307),
+      ANALYSIS_ROLE_COLUMN,
+      as.character(nrow(df_analysis)),
+      as.character(n_valid),
+      as.character(PIPELINE_SEED),
+      as.character(Sys.time())
+    )
   )
-  save_csv(analysis_config, "output/analysis_configuration.csv")
+  save_csv(config_info, "output/analysis_configuration.csv")
 }
 
-# ============================================================================
-# STAKEHOLDER DISTRIBUTION (using correct quota column)
-# ============================================================================
-stakeholder_summary <- df %>%
-  filter(!is.na(RoleCategory)) %>%
+# ==============================================================================
+# STAKEHOLDER DISTRIBUTION
+# ==============================================================================
+cli_h1("Stakeholder Distribution Analysis")
+
+stakeholder_summary <- df_analysis %>%
+  filter(RoleCategory != "Unclassified") %>%
   count(RoleCategory, name = "n", sort = TRUE) %>%
-  mutate(percentage = n / sum(n) * 100)
+  mutate(
+    percentage = round(n / sum(n) * 100, 2),
+    cumulative_pct = cumsum(percentage)
+  )
 
-inf("=== STAKEHOLDER DISTRIBUTION (", ANALYSIS_ROLE_COLUMN, ") ===")
-inf(capture.output(stakeholder_summary) %>% paste(collapse = "\n"))
+# Display summary
+cli_inform("Stakeholder distribution (N = {sum(stakeholder_summary$n)}):")
+print(stakeholder_summary, n = 15)
 
-# Critical validation for N=1,307
-if (sum(stakeholder_summary$n) != 1307) {
-  warning("Total N = ", sum(stakeholder_summary$n), " (expected 1,307)")
+# Critical validation
+total_n <- sum(stakeholder_summary$n)
+if (total_n != 1307) {
+  cli_warn("Total N = {total_n} (expected 1,307)")
 }
 
 if (SAVE_DIAGNOSTICS) {
-  # Add metadata about which column was analyzed
-  stakeholder_summary_export <- stakeholder_summary %>%
+  stakeholder_export <- stakeholder_summary %>%
     mutate(
       source_column = ANALYSIS_ROLE_COLUMN,
-      dataset = basename(INPUT_FINAL)
+      dataset = basename(PATHS$final_1307),
+      export_timestamp = Sys.time()
     )
-  save_csv(stakeholder_summary_export, "output/stakeholder_distribution_final.csv")
+  save_csv(stakeholder_export, "output/stakeholder_distribution_final.csv")
 }
 
-# ============================================================================
-# FIGURE 4: Geographic Distribution of Survey Respondents
-# ============================================================================
-# CRITICAL: Privacy-preserving geographic data handling
+# ==============================================================================
+# FIGURE 4: GEOGRAPHIC DISTRIBUTION (WITH PRIVACY PROTECTION)
+# ==============================================================================
+cli_h1("Figure 4: Geographic Distribution")
 
-# Check what geographic columns are available
-all_geo_cols <- grep("country|region|location|geo|Q2\\.2|hq_", names(df), 
-                     value = TRUE, ignore.case = TRUE)
-inf("\nGeographic columns present: ",
-    if(length(all_geo_cols) > 0) paste(all_geo_cols, collapse = ", ") else "NONE")
+# CRITICAL PRIVACY PROTECTION: Define forbidden columns
+FORBIDDEN_GEO_COLS <- c("Q2.2", "q2.2", "Q2_2", "Q2.2_raw", "raw_location", "exact_location")
 
-# Define acceptable anonymized columns (priority order)
-anonymized_candidates <- c("hq_country", "region", "geography", "country", "location")
+# Safe anonymized columns (priority order)
+SAFE_GEO_CANDIDATES <- c("region", "geography", "hq_region", "geo_region", "hq_country_grouped")
 
-# Check if Q2.2 (raw data) exists
-has_raw_q22 <- "Q2.2" %in% names(df)
+# Find available geographic columns
+all_geo_cols <- names(df_analysis)[grepl("region|geography|country|location|geo", 
+                                         names(df_analysis), ignore.case = TRUE)]
 
-# Find the best available geographic column (EXCLUDE Q2.2)
-safe_geo_cols <- setdiff(all_geo_cols, "Q2.2")
-geo_col <- intersect(anonymized_candidates, safe_geo_cols)[1]
+# Remove any forbidden columns
+safe_geo_cols <- setdiff(all_geo_cols, FORBIDDEN_GEO_COLS)
 
-# Handle different scenarios
-if (is.na(geo_col)) {
-  if (has_raw_q22) {
-    stop(paste(
-      "\n=== CRITICAL ERROR: Geographic Data Privacy Protection ===",
-      "\nRaw geographic data (Q2.2) detected but anonymized columns missing.",
-      "\nThis violates privacy requirements stated in README.md.",
-      "\n",
-      "\nRequired Action:",
-      "\n1. Run anonymization script first: Rscript R/01_anonymize_data.R",
-      "\n2. Ensure geographic data is properly anonymized to regions",
-      "\n3. Verify anonymized columns exist: hq_country, region, or geography",
-      "\n",
-      "\nDO NOT proceed with analysis using raw Q2.2 data.",
-      "\n=========================================================",
-      sep = "\n"
-    ))
-  } else {
-    warning("No geographic data available for Figure 4")
-    geo_col <- NA
+cli_inform("Available geographic columns: {paste(safe_geo_cols, collapse = ', ')}")
+
+# Find the best safe column
+geo_col <- NULL
+for (candidate in SAFE_GEO_CANDIDATES) {
+  if (candidate %in% safe_geo_cols) {
+    geo_col <- candidate
+    break
   }
-} else {
-  inf("✓ Using anonymized geographic column: ", geo_col)
-  inf("✓ Privacy requirements maintained per README.md")
 }
 
-# Proceed with geographic analysis only if safe column exists
-if (!is.na(geo_col)) {
-  geo_data <- df %>%
+# Additional safety check
+if (!is.null(geo_col)) {
+  # Verify it's actually anonymized
+  unique_values <- unique(na.omit(df_analysis[[geo_col]]))
+  n_unique <- length(unique_values)
+  
+  if (n_unique > 50) {
+    cli_warn(c(
+      "Geographic column '{geo_col}' has {n_unique} unique values",
+      "!" = "This may not be properly anonymized",
+      "x" = "Skipping geographic analysis for privacy protection"
+    ))
+    geo_col <- NULL
+  } else if (n_unique < 3) {
+    cli_warn("Geographic column has only {n_unique} unique values - insufficient for analysis")
+    geo_col <- NULL
+  } else {
+    cli_success("Using safe anonymized column: {.field {geo_col}} ({n_unique} regions)")
+  }
+}
+
+# Check if any forbidden columns exist
+forbidden_present <- intersect(FORBIDDEN_GEO_COLS, names(df_analysis))
+if (length(forbidden_present) > 0) {
+  cli_abort(c(
+    "PRIVACY VIOLATION: Raw geographic data detected",
+    "x" = "Found forbidden columns: {paste(forbidden_present, collapse = ', ')}",
+    "!" = "This violates privacy requirements",
+    "i" = "Run anonymization first: Rscript R/01_anonymize_data.R"
+  ))
+}
+
+# Proceed with geographic analysis only if safe
+if (!is.null(geo_col)) {
+  geo_data <- df_analysis %>%
     filter(!is.na(.data[[geo_col]]) & .data[[geo_col]] != "") %>%
     count(.data[[geo_col]], name = "n", sort = TRUE) %>%
     rename(Region = 1) %>%
-    mutate(percentage = n / sum(n) * 100)
-
-  inf("\nGeographic distribution (anonymized regions):")
-  inf(capture.output(utils::head(geo_data, 10)) %>% paste(collapse = "\n"))
-
+    mutate(
+      percentage = round(n / sum(n) * 100, 2),
+      label = paste0(Region, "\n(", percentage, "%)")
+    )
+  
+  cli_inform("Geographic distribution (top 10):")
+  print(head(geo_data, 10))
+  
+  # Create pie chart
   fig4 <- ggplot(geo_data, aes(x = "", y = percentage, fill = Region)) +
     geom_col(width = 1) +
     coord_polar(theta = "y") +
     theme_void() +
-    theme(legend.position = "right") +
-    scale_fill_manual(values = rep(climate_colors, length.out = nrow(geo_data)), name = "Region") +
-    labs(title = "Figure 4: Geographic Distribution of Survey Respondents",
-         subtitle = paste0("N = ", sum(geo_data$n), " (Anonymized Regions)"))
-
+    theme(
+      legend.position = "right",
+      plot.title = element_text(size = 14, face = "bold"),
+      plot.subtitle = element_text(size = 11)
+    ) +
+    scale_fill_manual(
+      values = rep(climate_colors, length.out = nrow(geo_data)),
+      name = "Region"
+    ) +
+    labs(
+      title = "Figure 4: Geographic Distribution of Survey Respondents",
+      subtitle = glue("N = {sum(geo_data$n)} (Anonymized Regions)")
+    )
+  
   save_plot("figures/figure4_geographic_distribution.png", fig4, width = 10, height = 6)
-  if (SAVE_DIAGNOSTICS) save_csv(geo_data, "output/figure4_geographic_distribution.csv")
+  
+  if (SAVE_DIAGNOSTICS) {
+    geo_export <- geo_data %>%
+      mutate(
+        source_column = geo_col,
+        privacy_status = "anonymized",
+        export_timestamp = Sys.time()
+      )
+    save_csv(geo_export, "output/figure4_geographic_distribution.csv")
+  }
+} else {
+  cli_warn(c(
+    "No safe geographic data available for Figure 4",
+    "i" = "Ensure data has been properly anonymized"
+  ))
 }
 
-# ============================================================================
-# FIGURE 6: Financial vs. Impact Focus by Stakeholder Group
-# ============================================================================
-# Q3.3: 1 = pure impact ... 7 = pure financial
-if ("Q3.3" %in% names(df)) {
-  df <- df %>% mutate(Q3_3_num = suppressWarnings(as.numeric(.data[["Q3.3"]])))
+# ==============================================================================
+# FIGURE 6: FINANCIAL VS. IMPACT FOCUS
+# ==============================================================================
+cli_h1("Figure 6: Financial vs. Impact Focus")
 
-  impact_data <- df %>%
-    filter(!is.na(RoleCategory), !is.na(Q3_3_num)) %>%
+if ("Q3_3_num" %in% names(df_analysis)) {
+  impact_data <- df_analysis %>%
+    filter(!is.na(RoleCategory), !is.na(Q3_3_num), RoleCategory != "Unclassified") %>%
     group_by(RoleCategory) %>%
     summarise(
       n = n(),
       mean_focus = mean(Q3_3_num, na.rm = TRUE),
-      sd_focus   = sd(Q3_3_num,   na.rm = TRUE),
-      se_focus   = sd_focus / sqrt(n),
-      ci_lower   = mean_focus - 1.96 * se_focus,
-      ci_upper   = mean_focus + 1.96 * se_focus,
+      sd_focus = sd(Q3_3_num, na.rm = TRUE),
+      se_focus = sd_focus / sqrt(n),
+      ci_lower = mean_focus - 1.96 * se_focus,
+      ci_upper = mean_focus + 1.96 * se_focus,
       .groups = "drop"
     ) %>%
-    filter(n >= 10) %>%   # minimum sample size
+    filter(n >= MIN_GROUP_SIZE) %>%
     arrange(desc(mean_focus))
-
-  inf("\n=== FINANCIAL vs IMPACT FOCUS BY STAKEHOLDER (Q3.3) ===")
-  inf("Analysis based on: ", ANALYSIS_ROLE_COLUMN)
-  inf(capture.output(impact_data) %>% paste(collapse = "\n"))
-
+  
+  cli_inform("Financial vs Impact Focus by Stakeholder:")
+  print(impact_data)
+  
+  # Create lollipop chart
   fig6 <- ggplot(impact_data, aes(x = reorder(RoleCategory, mean_focus), y = mean_focus)) +
-    geom_point(size = 3) +
-    geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper), width = 0.2) +
+    geom_segment(aes(xend = RoleCategory, y = 4, yend = mean_focus),
+                 color = "gray70", size = 0.5) +
+    geom_point(size = 4, color = "#1976D2") +
+    geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper),
+                  width = 0.2, color = "#1976D2", alpha = 0.7) +
     coord_flip() +
-    scale_y_continuous(limits = c(1, 7), breaks = 1:7) +
-    labs(title = "Figure 6: Financial vs. Impact Focus by Stakeholder Group",
-         subtitle = paste0("1 = Pure Impact Focus, 7 = Pure Financial Focus (95% CI) | N=", 
-                          sum(impact_data$n)),
-         x = "Stakeholder Group",
-         y = "Mean Investment Focus")
-
+    scale_y_continuous(
+      limits = c(1, 7),
+      breaks = 1:7,
+      labels = c("1\nPure\nImpact", "2", "3", "4\nBalanced", "5", "6", "7\nPure\nFinancial")
+    ) +
+    theme_minimal(base_size = 11) +
+    theme(
+      panel.grid.minor = element_blank(),
+      panel.grid.major.y = element_blank(),
+      axis.text.y = element_text(size = 10),
+      plot.title = element_text(size = 14, face = "bold"),
+      plot.subtitle = element_text(size = 11)
+    ) +
+    labs(
+      title = "Figure 6: Financial vs. Impact Focus by Stakeholder Group",
+      subtitle = glue("Mean scores with 95% CI | Total N = {sum(impact_data$n)}"),
+      x = "Stakeholder Group",
+      y = "Investment Focus Score"
+    )
+  
   save_plot("figures/figure6_financial_impact_focus.png", fig6, width = 10, height = 8)
   
   if (SAVE_DIAGNOSTICS) {
-    impact_data_export <- impact_data %>%
-      mutate(source_column = ANALYSIS_ROLE_COLUMN)
-    save_csv(impact_data_export, "output/figure6_financial_impact_focus.csv")
+    impact_export <- impact_data %>%
+      mutate(
+        source_column = ANALYSIS_ROLE_COLUMN,
+        analysis_date = Sys.date()
+      )
+    save_csv(impact_export, "output/figure6_financial_impact_focus.csv")
   }
 } else {
-  inf("! Q3.3 missing — skipping Figure 6")
+  cli_warn("Q3.3 not found - skipping Figure 6")
 }
 
-# ============================================================================
+# ==============================================================================
 # BARRIER ANALYSIS
-# ============================================================================
-barrier_cols <- grep("^(Q3\\.11|barrier|challenge)", names(df), value = TRUE, ignore.case = TRUE)
+# ==============================================================================
+cli_h1("Barrier Analysis")
+
+barrier_cols <- names(df_analysis)[grepl("^(Q3\\.11|barrier|challenge)", 
+                                         names(df_analysis), ignore.case = TRUE)]
 
 if (length(barrier_cols) > 0) {
-  inf("\n=== BARRIER ANALYSIS ===")
+  cli_inform("Found {length(barrier_cols)} barrier variables")
   
-  # Pivot to long format
-  barrier_long <- df %>%
+  # Convert to long format
+  barrier_long <- df_analysis %>%
     select(RoleCategory, all_of(barrier_cols)) %>%
-    pivot_longer(cols = -RoleCategory, names_to = "barrier_var", values_to = "val_raw",
-                 values_transform = list(val_raw = as.character)) %>%
-    mutate(val_present = !is.na(val_raw) & val_raw != "")
-
-  # By stakeholder
-  barrier_summary <- barrier_long %>%
-    group_by(RoleCategory, barrier_var) %>%
-    summarise(
-      n = n(),
-      pct_present = sum(val_present, na.rm = TRUE) / n * 100,
-      .groups = "drop"
+    filter(RoleCategory != "Unclassified") %>%
+    pivot_longer(
+      cols = -RoleCategory,
+      names_to = "barrier_var",
+      values_to = "val_raw",
+      values_transform = list(val_raw = as.character)
     ) %>%
-    filter(n >= 10) %>%
-    arrange(RoleCategory, desc(pct_present))
-
-  inf("Barrier presence by stakeholder (first 12 rows):")
-  inf(capture.output(utils::head(barrier_summary, 12)) %>% paste(collapse = "\n"))
-
-  if (SAVE_DIAGNOSTICS) {
-    barrier_summary_export <- barrier_summary %>%
-      mutate(analysis_column = ANALYSIS_ROLE_COLUMN)
-    save_csv(barrier_summary_export, "output/barrier_presence_by_stakeholder.csv")
-  }
+    mutate(
+      val_present = !is.na(val_raw) & val_raw != "" & val_raw != "0",
+      barrier_clean = str_remove(barrier_var, "^Q3\\.11_?")
+    )
   
-  # Overall barrier ranking
-  overall_barriers <- barrier_long %>%
-    group_by(barrier_var) %>%
+  # Summary by stakeholder
+  barrier_summary <- barrier_long %>%
+    group_by(RoleCategory, barrier_clean) %>%
     summarise(
       n_responses = n(),
       n_present = sum(val_present, na.rm = TRUE),
-      pct_overall = n_present / n_responses * 100,
+      pct_present = round(n_present / n_responses * 100, 2),
+      .groups = "drop"
+    ) %>%
+    filter(n_responses >= MIN_GROUP_SIZE) %>%
+    arrange(RoleCategory, desc(pct_present))
+  
+  # Overall ranking
+  overall_barriers <- barrier_long %>%
+    group_by(barrier_clean) %>%
+    summarise(
+      n_total = n(),
+      n_present = sum(val_present, na.rm = TRUE),
+      pct_overall = round(n_present / n_total * 100, 2),
       .groups = "drop"
     ) %>%
     arrange(desc(pct_overall))
   
-  if (SAVE_DIAGNOSTICS) save_csv(overall_barriers, "output/overall_barrier_ranking.csv")
+  cli_inform("Top 10 barriers overall:")
+  print(head(overall_barriers, 10))
   
-  inf("\nTOP BARRIERS OVERALL:")
-  inf(capture.output(utils::head(overall_barriers, 10)) %>% paste(collapse = "\n"))
+  if (SAVE_DIAGNOSTICS) {
+    save_csv(barrier_summary, "output/barrier_presence_by_stakeholder.csv")
+    save_csv(overall_barriers, "output/overall_barrier_ranking.csv")
+  }
+  
+  # Create heatmap for top barriers
+  if (nrow(overall_barriers) > 0) {
+    top_barriers <- head(overall_barriers$barrier_clean, 10)
+    
+    heatmap_data <- barrier_summary %>%
+      filter(barrier_clean %in% top_barriers) %>%
+      select(RoleCategory, barrier_clean, pct_present)
+    
+    if (nrow(heatmap_data) > 0) {
+      fig_barriers <- ggplot(heatmap_data, 
+                            aes(x = barrier_clean, y = RoleCategory, fill = pct_present)) +
+        geom_tile(color = "white", size = 0.5) +
+        scale_fill_gradient2(
+          low = "#2E7D32",
+          mid = "#FFC107",
+          high = "#C62828",
+          midpoint = 50,
+          limits = c(0, 100),
+          name = "% Reporting\nBarrier"
+        ) +
+        theme_minimal(base_size = 10) +
+        theme(
+          axis.text.x = element_text(angle = 45, hjust = 1),
+          plot.title = element_text(size = 14, face = "bold")
+        ) +
+        labs(
+          title = "Barrier Prevalence by Stakeholder Group",
+          subtitle = "Top 10 barriers across all groups",
+          x = "Barrier Type",
+          y = "Stakeholder Group"
+        )
+      
+      save_plot("figures/barrier_heatmap.png", fig_barriers, width = 12, height = 8)
+    }
+  }
+} else {
+  cli_warn("No barrier variables found")
 }
 
-# ============================================================================
+# ==============================================================================
 # RISK PERCEPTION ANALYSIS
-# ============================================================================
-risk_cols <- grep("^(Q3\\.6|risk)", names(df), value = TRUE, ignore.case = TRUE)
+# ==============================================================================
+cli_h1("Risk Perception Analysis")
+
+risk_cols <- names(df_analysis)[grepl("^(Q3\\.6|risk)", names(df_analysis), ignore.case = TRUE)]
 
 if (length(risk_cols) > 0) {
-  inf("\n=== RISK PERCEPTION ANALYSIS ===")
+  cli_inform("Found {length(risk_cols)} risk variables")
   
-  # Convert risk columns to numeric
-  risk_data <- df %>%
+  # Convert to numeric
+  risk_data <- df_analysis %>%
     select(RoleCategory, all_of(risk_cols)) %>%
+    filter(RoleCategory != "Unclassified") %>%
     mutate(across(all_of(risk_cols), ~suppressWarnings(as.numeric(.x))))
   
-  # Calculate mean risk perception by stakeholder
+  # Calculate means by stakeholder
   risk_summary <- risk_data %>%
     group_by(RoleCategory) %>%
     summarise(
       n = n(),
-      across(all_of(risk_cols), 
+      across(all_of(risk_cols),
              list(mean = ~mean(.x, na.rm = TRUE),
                   sd = ~sd(.x, na.rm = TRUE)),
              .names = "{.col}_{.fn}"),
       .groups = "drop"
     ) %>%
-    filter(n >= 10)
+    filter(n >= MIN_GROUP_SIZE)
   
   if (SAVE_DIAGNOSTICS) {
-    risk_summary_export <- risk_summary %>%
-      mutate(analysis_column = ANALYSIS_ROLE_COLUMN)
-    save_csv(risk_summary_export, "output/risk_perception_by_stakeholder.csv")
+    save_csv(risk_summary, "output/risk_perception_by_stakeholder.csv")
   }
   
-  # Create risk perception heatmap
-  risk_means <- risk_data %>%
-    group_by(RoleCategory) %>%
-    summarise(across(all_of(risk_cols), ~mean(.x, na.rm = TRUE)), .groups = "drop") %>%
-    filter(RoleCategory %in% stakeholder_summary$RoleCategory[1:min(10, nrow(stakeholder_summary))])
-  
-  if (nrow(risk_means) > 0 && length(risk_cols) > 1) {
+  # Create risk heatmap
+  if (nrow(risk_summary) > 0 && length(risk_cols) > 1) {
+    risk_means <- risk_data %>%
+      group_by(RoleCategory) %>%
+      summarise(across(all_of(risk_cols), ~mean(.x, na.rm = TRUE)), .groups = "drop") %>%
+      filter(RoleCategory %in% head(levels(risk_data$RoleCategory), 10))
+    
     risk_heatmap_data <- risk_means %>%
-      pivot_longer(cols = -RoleCategory, names_to = "Risk_Type", values_to = "Mean_Score")
+      pivot_longer(cols = -RoleCategory, names_to = "Risk_Type", values_to = "Mean_Score") %>%
+      mutate(Risk_Type = str_remove(Risk_Type, "^Q3\\.6_?"))
     
-    # Clean risk type names
-    risk_heatmap_data <- risk_heatmap_data %>%
-      mutate(Risk_Type = gsub("Q3\\.6_?|_risk", "", Risk_Type))
-    
-    fig_risk <- ggplot(risk_heatmap_data, aes(x = Risk_Type, y = RoleCategory, fill = Mean_Score)) +
-      geom_tile() +
-      scale_fill_gradient2(low = "green", mid = "yellow", high = "red", midpoint = 4,
-                           limits = c(1, 7), name = "Risk Level") +
-      theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
-      labs(title = "Risk Perception Heatmap by Stakeholder Group",
-           subtitle = paste0("Based on ", ANALYSIS_ROLE_COLUMN, " | N=", sum(stakeholder_summary$n)),
-           x = "Risk Type", y = "Stakeholder Group")
+    fig_risk <- ggplot(risk_heatmap_data, 
+                       aes(x = Risk_Type, y = RoleCategory, fill = Mean_Score)) +
+      geom_tile(color = "white") +
+      scale_fill_gradient2(
+        low = "#2E7D32",
+        mid = "#FFC107",
+        high = "#C62828",
+        midpoint = 4,
+        limits = c(1, 7),
+        name = "Risk Level"
+      ) +
+      theme_minimal(base_size = 10) +
+      theme(
+        axis.text.x = element_text(angle = 45, hjust = 1),
+        plot.title = element_text(size = 14, face = "bold")
+      ) +
+      labs(
+        title = "Risk Perception Heatmap by Stakeholder Group",
+        subtitle = glue("Based on {ANALYSIS_ROLE_COLUMN} | N={sum(risk_summary$n)}"),
+        x = "Risk Type",
+        y = "Stakeholder Group"
+      )
     
     save_plot("figures/risk_perception_heatmap.png", fig_risk, width = 12, height = 8)
   }
+} else {
+  cli_warn("No risk perception variables found")
 }
 
-# ============================================================================
+# ==============================================================================
 # TECHNOLOGY PREFERENCE ANALYSIS
-# ============================================================================
-tech_cols <- grep("^(Q12\\.|technology|tech_|solution)", names(df), value = TRUE, ignore.case = TRUE)
+# ==============================================================================
+cli_h1("Technology Preference Analysis")
+
+tech_cols <- names(df_analysis)[grepl("^(Q12\\.|technology|tech_|solution)", 
+                                      names(df_analysis), ignore.case = TRUE)]
 
 if (length(tech_cols) > 0) {
-  inf("\n=== TECHNOLOGY PREFERENCE ANALYSIS ===")
+  cli_inform("Found {length(tech_cols)} technology variables")
   
-  tech_data <- df %>%
+  tech_data <- df_analysis %>%
     select(RoleCategory, all_of(tech_cols)) %>%
+    filter(RoleCategory != "Unclassified") %>%
     mutate(across(all_of(tech_cols), ~suppressWarnings(as.numeric(.x))))
   
   tech_summary <- tech_data %>%
@@ -437,83 +625,56 @@ if (length(tech_cols) > 0) {
              .names = "{.col}_mean"),
       .groups = "drop"
     ) %>%
-    filter(n >= 10)
+    filter(n >= MIN_GROUP_SIZE)
   
   if (SAVE_DIAGNOSTICS) {
-    tech_summary_export <- tech_summary %>%
-      mutate(analysis_column = ANALYSIS_ROLE_COLUMN)
-    save_csv(tech_summary_export, "output/technology_preferences_by_stakeholder.csv")
+    save_csv(tech_summary, "output/technology_preferences_by_stakeholder.csv")
   }
 }
 
-# ============================================================================
-# INVESTMENT CRITERIA ANALYSIS
-# ============================================================================
-investment_cols <- grep("^(Q3\\.[4-5]|investment|criteria)", names(df), value = TRUE, ignore.case = TRUE)
+# ==============================================================================
+# CORRELATION ANALYSIS
+# ==============================================================================
+cli_h1("Correlation Analysis")
 
-if (length(investment_cols) > 0) {
-  inf("\n=== INVESTMENT CRITERIA ANALYSIS ===")
-  
-  investment_data <- df %>%
-    select(RoleCategory, all_of(investment_cols)) %>%
-    mutate(across(all_of(investment_cols), ~suppressWarnings(as.numeric(.x))))
-  
-  investment_summary <- investment_data %>%
-    group_by(RoleCategory) %>%
-    summarise(
-      n = n(),
-      across(all_of(investment_cols),
-             ~mean(.x, na.rm = TRUE),
-             .names = "{.col}_mean"),
-      .groups = "drop"
-    ) %>%
-    filter(n >= 10)
-  
-  if (SAVE_DIAGNOSTICS) {
-    investment_summary_export <- investment_summary %>%
-      mutate(analysis_column = ANALYSIS_ROLE_COLUMN)
-    save_csv(investment_summary_export, "output/investment_criteria_by_stakeholder.csv")
-  }
-}
-
-# ============================================================================
-# CORRELATION ANALYSIS BETWEEN KEY VARIABLES
-# ============================================================================
-if ("Q3_3_num" %in% names(df) && length(risk_cols) > 0) {
-  inf("\n=== CORRELATION ANALYSIS ===")
-  
-  numeric_vars <- df %>%
-    select(Q3_3_num, any_of(c("Progress", risk_cols[1:min(5, length(risk_cols))]))) %>%
+if ("Q3_3_num" %in% names(df_analysis) && length(risk_cols) > 0) {
+  numeric_vars <- df_analysis %>%
+    select(any_of(c("Q3_3_num", "Progress", risk_cols[1:min(5, length(risk_cols))]))) %>%
     select_if(is.numeric)
   
   if (ncol(numeric_vars) > 1) {
     cor_matrix <- cor(numeric_vars, use = "pairwise.complete.obs")
     
     if (SAVE_DIAGNOSTICS) {
-      cor_df <- as.data.frame(cor_matrix)
-      cor_df$Variable <- rownames(cor_df)
-      cor_df <- cor_df %>% select(Variable, everything())
+      cor_df <- as_tibble(cor_matrix, rownames = "Variable")
       save_csv(cor_df, "output/correlation_matrix_key_variables.csv")
     }
     
     # Create correlation plot if corrplot available
     if (requireNamespace("corrplot", quietly = TRUE)) {
       png("figures/correlation_matrix.png", width = 10, height = 8, units = "in", res = 150)
-      corrplot::corrplot(cor_matrix, method = "color", type = "upper",
-                        order = "hclust", addCoef.col = "black",
-                        tl.col = "black", tl.srt = 45,
-                        title = "Correlation Matrix of Key Variables",
-                        mar = c(0, 0, 2, 0))
+      corrplot::corrplot(
+        cor_matrix,
+        method = "color",
+        type = "upper",
+        order = "hclust",
+        addCoef.col = "black",
+        number.cex = 0.7,
+        tl.col = "black",
+        tl.srt = 45,
+        title = "Correlation Matrix of Key Variables",
+        mar = c(0, 0, 2, 0)
+      )
       dev.off()
-      inf("✓ Saved correlation matrix plot")
+      cli_success("Saved correlation matrix plot")
     }
   }
 }
 
-# ============================================================================
+# ==============================================================================
 # SAMPLE SIZE ADEQUACY CHECK
-# ============================================================================
-inf("\n=== SAMPLE SIZE ADEQUACY ===")
+# ==============================================================================
+cli_h1("Sample Size Adequacy Check")
 
 sample_check <- stakeholder_summary %>%
   mutate(
@@ -522,61 +683,70 @@ sample_check <- stakeholder_summary %>%
     power_80_detect_d05 = n >= 64  # For detecting Cohen's d = 0.5 with 80% power
   )
 
-inf("Groups with n >= 30 (adequate for means): ", sum(sample_check$adequate_for_means))
-inf("Groups with n >= 10 (minimum for analysis): ", sum(sample_check$adequate_for_proportions))
-inf("Groups with n >= 64 (80% power, d=0.5): ", sum(sample_check$power_80_detect_d05))
+cli_inform("Sample size adequacy:")
+cli_inform("  Groups with n >= 30 (adequate for means): {sum(sample_check$adequate_for_means)}")
+cli_inform("  Groups with n >= 10 (minimum for analysis): {sum(sample_check$adequate_for_proportions)}")
+cli_inform("  Groups with n >= 64 (80% power, d=0.5): {sum(sample_check$power_80_detect_d05)}")
 
 if (SAVE_DIAGNOSTICS) {
-  sample_check_export <- sample_check %>%
-    mutate(analysis_column = ANALYSIS_ROLE_COLUMN)
-  save_csv(sample_check_export, "output/sample_size_adequacy.csv")
+  save_csv(sample_check, "output/sample_size_adequacy.csv")
 }
 
-# ============================================================================
+# ==============================================================================
 # DATA QUALITY METRICS
-# ============================================================================
-inf("\n=== DATA QUALITY METRICS ===")
+# ==============================================================================
+cli_h1("Data Quality Metrics")
 
-# Check if Progress column exists
-if ("Progress" %in% names(df)) {
-  quality_metrics <- data.frame(
-    Metric = c("Total Responses", "Complete Cases", "Progress >= 90%", 
-               "Progress >= 75%", "Progress >= 50%"),
+quality_metrics <- tibble(
+  Metric = character(),
+  Count = numeric(),
+  Percentage = numeric()
+)
+
+# Basic metrics
+quality_metrics <- bind_rows(
+  quality_metrics,
+  tibble(
+    Metric = "Total Responses",
+    Count = nrow(df_analysis),
+    Percentage = 100
+  ),
+  tibble(
+    Metric = "Complete Cases",
+    Count = sum(complete.cases(df_analysis)),
+    Percentage = round(sum(complete.cases(df_analysis)) / nrow(df_analysis) * 100, 1)
+  )
+)
+
+# Progress-based metrics if available
+if ("Progress" %in% names(df_analysis)) {
+  progress_metrics <- tibble(
+    Metric = c("Progress >= 90%", "Progress >= 75%", "Progress >= 50%"),
     Count = c(
-      nrow(df),
-      sum(complete.cases(df)),
-      sum(df$Progress >= 90, na.rm = TRUE),
-      sum(df$Progress >= 75, na.rm = TRUE),
-      sum(df$Progress >= 50, na.rm = TRUE)
-    ),
-    Percentage = NA
-  )
-} else {
-  quality_metrics <- data.frame(
-    Metric = c("Total Responses", "Complete Cases"),
-    Count = c(nrow(df), sum(complete.cases(df))),
-    Percentage = NA
-  )
+      sum(df_analysis$Progress >= 90, na.rm = TRUE),
+      sum(df_analysis$Progress >= 75, na.rm = TRUE),
+      sum(df_analysis$Progress >= 50, na.rm = TRUE)
+    )
+  ) %>%
+    mutate(Percentage = round(Count / nrow(df_analysis) * 100, 1))
+  
+  quality_metrics <- bind_rows(quality_metrics, progress_metrics)
 }
 
-quality_metrics$Percentage <- round(quality_metrics$Count / nrow(df) * 100, 1)
-
-inf(capture.output(quality_metrics) %>% paste(collapse = "\n"))
+print(quality_metrics)
 
 if (SAVE_DIAGNOSTICS) {
-  quality_metrics$analysis_column <- ANALYSIS_ROLE_COLUMN
   save_csv(quality_metrics, "output/data_quality_metrics.csv")
 }
 
-# ============================================================================
+# ==============================================================================
 # MISSINGNESS ANALYSIS
-# ============================================================================
+# ==============================================================================
+cli_h1("Missingness Analysis")
+
 if (exists("schema")) {
-  inf("\n=== MISSINGNESS ANALYSIS ===")
-  
   missingness <- schema %>%
     mutate(
-      pct_missing = round(n_missing / nrow(df) * 100, 1),
       missingness_category = case_when(
         pct_missing == 0 ~ "Complete",
         pct_missing < 5 ~ "Minimal (<5%)",
@@ -587,86 +757,108 @@ if (exists("schema")) {
     ) %>%
     arrange(desc(pct_missing))
   
-  inf("Variables by missingness category:")
-  inf(capture.output(table(missingness$missingness_category)) %>% paste(collapse = "\n"))
+  missingness_summary <- missingness %>%
+    count(missingness_category) %>%
+    mutate(percentage = round(n / sum(n) * 100, 1))
   
-  if (SAVE_DIAGNOSTICS) save_csv(missingness, "output/missingness_analysis.csv")
+  cli_inform("Variables by missingness category:")
+  print(missingness_summary)
+  
+  if (SAVE_DIAGNOSTICS) {
+    save_csv(missingness, "output/missingness_analysis.csv")
+  }
 }
 
-# ============================================================================
-# COMPLETENESS CHECK FOR QUOTA-MATCHED DATA
-# ============================================================================
-if ("Original_Classification" %in% names(df) && "Was_Reassigned" %in% names(df)) {
-  inf("\n=== QUOTA MATCHING COMPLETENESS ===")
+# ==============================================================================
+# QUOTA MATCHING VALIDATION
+# ==============================================================================
+if (all(c("Original_Classification", "Was_Reassigned") %in% names(df_analysis))) {
+  cli_h1("Quota Matching Validation")
   
-  # Check completeness by original vs reassigned
-  completeness_by_reassignment <- df %>%
+  completeness_by_reassignment <- df_analysis %>%
     group_by(Was_Reassigned) %>%
     summarise(
       n = n(),
-      mean_progress = if("Progress" %in% names(df)) mean(Progress, na.rm = TRUE) else NA,
+      mean_progress = if("Progress" %in% names(df_analysis)) {
+        mean(Progress, na.rm = TRUE)
+      } else {
+        NA_real_
+      },
       complete_cases = sum(complete.cases(.)),
       .groups = "drop"
     )
   
-  inf("Completeness by reassignment status:")
-  inf(capture.output(completeness_by_reassignment) %>% paste(collapse = "\n"))
+  cli_inform("Completeness by reassignment status:")
+  print(completeness_by_reassignment)
   
   if (SAVE_DIAGNOSTICS) {
-    completeness_export <- completeness_by_reassignment %>%
-      mutate(analysis_column = ANALYSIS_ROLE_COLUMN)
-    save_csv(completeness_export, "output/completeness_by_reassignment.csv")
+    save_csv(completeness_by_reassignment, "output/completeness_by_reassignment.csv")
   }
 }
 
-# ============================================================================
-# OVERALL STATS SNAPSHOT
-# ============================================================================
-inf("\n=== OVERALL STATISTICS ===")
-inf("Total responses: ", nrow(df))
-inf("Analysis role column: ", ANALYSIS_ROLE_COLUMN)
-inf("With stakeholder classification: ", sum(!is.na(df$RoleCategory)))
-if ("Q3.3" %in% names(df)) inf("With Q3.3 (financial/impact): ", sum(!is.na(df$Q3.3)))
-if (!is.na(geo_col)) {
-  inf("With geographic data (", geo_col, "): ", 
-      sum(!is.na(df[[geo_col]]) & df[[geo_col]] != ""))
-}
+# ==============================================================================
+# FINAL SUMMARY REPORT
+# ==============================================================================
+cli_h1("Analysis Complete")
 
-# Write final summary
+# Generate summary statistics
+summary_stats <- list(
+  total_responses = nrow(df_analysis),
+  analysis_column = ANALYSIS_ROLE_COLUMN,
+  n_with_classification = sum(df_analysis$RoleCategory != "Unclassified"),
+  n_categories = n_distinct(df_analysis$RoleCategory[df_analysis$RoleCategory != "Unclassified"]),
+  geographic_column = ifelse(exists("geo_col") && !is.null(geo_col), geo_col, "None"),
+  n_with_geography = if(exists("geo_col") && !is.null(geo_col)) {
+    sum(!is.na(df_analysis[[geo_col]]))
+  } else {
+    0
+  },
+  seed_used = PIPELINE_SEED,
+  timestamp = Sys.time()
+)
+
+# Create final summary
+analysis_summary <- tibble(
+  parameter = names(summary_stats),
+  value = as.character(summary_stats)
+)
+
 if (SAVE_DIAGNOSTICS) {
-  analysis_summary <- tibble::tibble(
-    dataset = basename(INPUT_FINAL),
-    analysis_column = ANALYSIS_ROLE_COLUMN,
-    total_n = nrow(df),
-    n_with_role = sum(!is.na(df$RoleCategory)),
-    n_categories = n_distinct(df$RoleCategory, na.rm = TRUE),
-    geographic_column = ifelse(is.na(geo_col), "None", geo_col),
-    n_with_geography = if(!is.na(geo_col)) sum(!is.na(df[[geo_col]])) else 0,
-    timestamp = Sys.time()
-  )
-  save_csv(analysis_summary, "output/analysis_summary.csv")
+  save_csv(analysis_summary, "output/analysis_summary_final.csv")
 }
 
-# ============================================================================
-# FINAL SUMMARY
-# ============================================================================
-cat("\n")
-cat("=" %.% rep("", 70), "\n")
-cat("✓ MAIN ANALYSIS COMPLETED SUCCESSFULLY\n")
-cat("=" %.% rep("", 70), "\n")
-cat("\nAnalysis Configuration:\n")
-cat("  Dataset: ", basename(INPUT_FINAL), " (N=", nrow(df), ")\n", sep = "")
-cat("  Role Column: ", ANALYSIS_ROLE_COLUMN, "\n", sep = "")
-if (!is.na(geo_col)) {
-  cat("  Geographic: ", geo_col, " (anonymized)\n", sep = "")
+# Display final summary
+cli_rule(left = "ANALYSIS COMPLETED SUCCESSFULLY", line_col = "green")
+cli_inform("")
+cli_inform("Configuration:")
+cli_inform("  Dataset: {.file {basename(PATHS$final_1307)}} (N={nrow(df_analysis)})")
+cli_inform("  Role Column: {.field {ANALYSIS_ROLE_COLUMN}}")
+cli_inform("  Seed: {PIPELINE_SEED}")
+if (exists("geo_col") && !is.null(geo_col)) {
+  cli_inform("  Geographic: {.field {geo_col}} (anonymized)")
 }
-cat("\nKey Outputs Generated:\n")
-cat("  • Figure 4: Geographic distribution\n")
-cat("  • Figure 6: Financial vs impact focus by stakeholder\n")
-cat("  • Stakeholder distribution (quota-matched N=1,307)\n")
-cat("  • Barrier analysis by stakeholder group\n")
-if (length(risk_cols) > 0) cat("  • Risk perception heatmap\n")
-if (exists("cor_matrix")) cat("  • Correlation matrix of key variables\n")
-cat("\nAll figures saved to: figures/\n")
-cat("All data files saved to: output/\n")
-cat("\n✓ Ready for manuscript preparation\n")
+
+cli_inform("")
+cli_inform("Key Outputs Generated:")
+cli_inform("  • Stakeholder distribution (N={sum(stakeholder_summary$n)})")
+if (exists("geo_col") && !is.null(geo_col)) {
+  cli_inform("  • Figure 4: Geographic distribution")
+}
+if ("Q3_3_num" %in% names(df_analysis)) {
+  cli_inform("  • Figure 6: Financial vs impact focus")
+}
+if (length(barrier_cols) > 0) {
+  cli_inform("  • Barrier analysis by stakeholder")
+}
+if (length(risk_cols) > 0) {
+  cli_inform("  • Risk perception heatmap")
+}
+if (exists("cor_matrix")) {
+  cli_inform("  • Correlation matrix")
+}
+
+cli_inform("")
+cli_inform("All figures saved to: {.path figures/}")
+cli_inform("All data files saved to: {.path output/}")
+cli_inform("")
+cli_success("Ready for manuscript preparation")

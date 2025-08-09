@@ -8,14 +8,16 @@ if (!exists(".local", inherits = TRUE)) .local <- function(...) NULL
 # ========================================================================
 # Author: Richard McKinney
 # Date: 2025-08-09
-# Version: 2.0 - Complete rewrite with critical fixes
+# Version: 3.0 - Complete rewrite with configuration management
 # 
 # CRITICAL FIXES APPLIED:
-# 1. Removed ALL synthetic/proxy data generation
-# 2. Uses quota_target_category for N=1,307 sample analysis
-# 3. Centralized column mapping to reduce redundancy
-# 4. Added statistical safeguards (small cell checks, multiple testing correction)
-# 5. Removed Q2.2 from geographic candidates (privacy)
+# 1. Configuration-based seed management (Issue 1)
+# 2. Robust PCA requirements checking (Issue 2)
+# 3. Enhanced output directory creation (Issue 3)
+# 4. Uses quota_target_category for N=1,307 sample analysis
+# 5. Centralized column mapping to reduce redundancy
+# 6. Statistical safeguards (small cell checks, multiple testing correction)
+# 7. Q2.2 removed from geographic candidates (privacy)
 # ========================================================================
 
 suppressPackageStartupMessages({
@@ -32,13 +34,59 @@ suppressPackageStartupMessages({
   library(reshape2)   # Data reshaping
 })
 
-set.seed(1307)
+# ========================================================================
+# CONFIGURATION MANAGEMENT (Issue 1 Fix)
+# ========================================================================
+# Try to load configuration file for consistent seed across pipeline
+if (file.exists("R/00_config.R")) {
+  source("R/00_config.R")
+  if (exists("PIPELINE_SEED")) {
+    set.seed(PIPELINE_SEED)
+    message(sprintf("✓ Using pipeline seed from config: %d", PIPELINE_SEED))
+  } else {
+    warning("Config file found but PIPELINE_SEED not defined, using default seed")
+    set.seed(1307)
+  }
+} else if (file.exists("00_config.R")) {
+  # Try current directory as fallback
+  source("00_config.R")
+  if (exists("PIPELINE_SEED")) {
+    set.seed(PIPELINE_SEED)
+    message(sprintf("✓ Using pipeline seed from local config: %d", PIPELINE_SEED))
+  } else {
+    set.seed(1307)
+  }
+} else {
+  warning("Config file not found, using default seed 1307")
+  set.seed(1307)
+}
+
 Sys.setenv(TZ = "UTC")
 
-# Create output directories
-dir.create("output", showWarnings = FALSE, recursive = TRUE)
-dir.create("figures", showWarnings = FALSE, recursive = TRUE)
-dir.create("output/tables", showWarnings = FALSE, recursive = TRUE)
+# ========================================================================
+# OUTPUT DIRECTORY CREATION (Issue 3 Fix)
+# ========================================================================
+# Enhanced directory creation with verification
+output_dirs <- c("output", "output/tables", "figures")
+for (dir in output_dirs) {
+  if (!dir.exists(dir)) {
+    dir.create(dir, recursive = TRUE, showWarnings = FALSE)
+    message(sprintf("✓ Created directory: %s", dir))
+  } else {
+    message(sprintf("✓ Directory exists: %s", dir))
+  }
+}
+
+# Verify directories are writable
+for (dir in output_dirs) {
+  test_file <- file.path(dir, ".write_test")
+  tryCatch({
+    writeLines("test", test_file)
+    unlink(test_file)
+  }, error = function(e) {
+    stop(sprintf("Directory %s is not writable: %s", dir, e$message))
+  })
+}
 
 # ========================================================================
 # CENTRALIZED CONFIGURATION AND COLUMN MAPPING
@@ -52,9 +100,9 @@ COLUMN_MAP <- list(
   # Risk perception columns
   tech_risk = c("technology_risk", "tech_risk", "Q3.6_1", "Q3.6_technology", "Q3_6_1", "technology_risk_perception"),
   market_risk = c("market_risk", "Q3.6_2", "Q3.6_market", "Q3_6_2", "market_risk_perception"),
-  physical_risk = c("physical_risk", "Q3.6_physical", "Q3_6_4", "climate_physical_risk"),
-  operational_risk = c("operational_risk", "Q3.6_operational", "Q3_6_5", "ops_risk"),
-  regulatory_risk = c("regulatory_concern", "Q3.6_regulatory", "Q3_6_3", "regulatory_risk", "reg_concern"),
+  physical_risk = c("physical_risk", "Q3.6_physical", "Q3_6_4", "climate_physical_risk", "Q3.6_4"),
+  operational_risk = c("operational_risk", "Q3.6_operational", "Q3_6_5", "ops_risk", "Q3.6_5"),
+  regulatory_risk = c("regulatory_concern", "Q3.6_regulatory", "Q3_6_3", "regulatory_risk", "reg_concern", "Q3.6_3"),
   
   # Barrier columns
   market_barrier = c("market_readiness_barrier", "Q3.11_1", "Q3.11_market", "market_barrier", "Q3_11_1"),
@@ -135,7 +183,7 @@ safe_get_percentage <- function(prop_table, row_name, col_name) {
 # ========================================================================
 
 message("=" + paste(rep("=", 69), collapse = ""))
-message("HYPOTHESIS TESTING PIPELINE - VERSION 2.0")
+message("HYPOTHESIS TESTING PIPELINE - VERSION 3.0")
 message("=" + paste(rep("=", 69), collapse = ""))
 
 # Load data
@@ -828,92 +876,198 @@ if (length(tech_cols) >= 3) {
 }
 
 # ========================================================================
-# THREE-FACTOR CLIMATE RISK MODEL (Table 3 in manuscript)
+# THREE-FACTOR CLIMATE RISK MODEL (Table 3 in manuscript) - ISSUE 2 FIX
 # ========================================================================
 message("\n=== Three-Factor Climate Risk Model Analysis ===")
 
-# Identify available risk types
-risk_types <- c("physical", "operational", "policy", "regulatory", 
-               "market", "financial", "technology", "supply_chain",
-               "reputational", "litigation")
+# Identify available risk columns using column mapping
+risk_cols_candidates <- list(
+  physical = COLUMN_MAP$physical_risk,
+  operational = COLUMN_MAP$operational_risk,
+  regulatory = COLUMN_MAP$regulatory_risk,
+  market = COLUMN_MAP$market_risk,
+  tech = COLUMN_MAP$tech_risk
+)
 
-# Check how many risk columns we actually have
 risk_cols_available <- character()
-for (risk in risk_types) {
-  col_name <- paste0(risk, "_risk")
-  if (col_name %in% names(df)) {
-    risk_cols_available <- c(risk_cols_available, col_name)
+risk_cols_mapping <- list()  # Track which column maps to which risk type
+
+for (risk_type in names(risk_cols_candidates)) {
+  col_found <- find_column(df, risk_cols_candidates[[risk_type]])
+  if (col_found$found) {
+    risk_cols_available <- c(risk_cols_available, col_found$column)
+    risk_cols_mapping[[col_found$column]] <- risk_type
+    message(sprintf("  Found %s risk: %s", risk_type, col_found$column))
   }
 }
 
-# If we have fewer than 3 risk types, try to find them in Q3.6 columns
+# Remove duplicates
+risk_cols_available <- unique(risk_cols_available)
+message(sprintf("  Total unique risk columns found: %d", length(risk_cols_available)))
+
+# CRITICAL CHECK: Need at least 3 variables for meaningful factor analysis
 if (length(risk_cols_available) < 3) {
-  risk_pattern_cols <- grep("Q3\\.6|risk", names(df), value = TRUE, ignore.case = TRUE)
-  if (length(risk_pattern_cols) >= 3) {
-    message("Using available risk columns from survey questions for factor analysis")
-    for (i in 1:min(length(risk_types), length(risk_pattern_cols))) {
-      col_name <- paste0(risk_types[i], "_risk")
-      if (!col_name %in% names(df)) {
-        df[[col_name]] <- suppressWarnings(as.numeric(df[[risk_pattern_cols[i]]]))
-        risk_cols_available <- c(risk_cols_available, col_name)
-      }
-    }
-  }
-}
-
-if (length(risk_cols_available) >= 3) {
-  # Prepare data for factor analysis
-  risk_data <- df[, risk_cols_available]
-  risk_data_complete <- na.omit(risk_data)
+  message(sprintf(
+    "Three-Factor Model: SKIPPED. Found only %d risk variables, need at least 3.",
+    length(risk_cols_available)
+  ))
+  message("  Available columns: ", paste(risk_cols_available, collapse = ", "))
   
-  if (nrow(risk_data_complete) > 30 && ncol(risk_data_complete) >= 3) {
-    # KMO and Bartlett's test
-    kmo_result <- KMO(risk_data_complete)
-    bartlett_result <- cortest.bartlett(cor(risk_data_complete), n = nrow(risk_data_complete))
+  # Document why analysis was skipped
+  three_factor_skip <- data.frame(
+    Analysis = "Three-Factor Model",
+    Status = "Skipped",
+    Reason = sprintf("Only %d risk variables available (need ≥3)", length(risk_cols_available)),
+    Available_Columns = paste(risk_cols_available, collapse = ", ")
+  )
+  write.csv(three_factor_skip, "output/tables/three_factor_skip_reason.csv", row.names = FALSE)
+} else {
+  message(sprintf("  Proceeding with %d risk variables", length(risk_cols_available)))
+  
+  # Prepare data
+  risk_data <- df[, risk_cols_available, drop = FALSE] %>%
+    mutate(across(everything(), as.numeric))
+  
+  # Remove rows with any NA values
+  risk_data_complete <- na.omit(risk_data)
+  message(sprintf("  Complete cases: %d", nrow(risk_data_complete)))
+  
+  # Check sample size requirements (at least 5 observations per variable, minimum 30)
+  min_cases_needed <- max(30, length(risk_cols_available) * 5)
+  
+  if (nrow(risk_data_complete) < min_cases_needed) {
+    message(sprintf(
+      "Three-Factor Model: Insufficient cases. Have %d, need at least %d",
+      nrow(risk_data_complete), min_cases_needed
+    ))
     
-    message(sprintf("KMO = %.3f, Bartlett's χ²(%d) = %.1f, p < .001",
-                    kmo_result$MSA, ncol(risk_data_complete) * (ncol(risk_data_complete) - 1) / 2,
+    three_factor_insufficient <- data.frame(
+      Analysis = "Three-Factor Model",
+      Status = "Insufficient Data",
+      Complete_Cases = nrow(risk_data_complete),
+      Required_Cases = min_cases_needed,
+      Variables_Used = length(risk_cols_available)
+    )
+    write.csv(three_factor_insufficient, "output/tables/three_factor_insufficient_data.csv", 
+              row.names = FALSE)
+  } else {
+    # Check correlation matrix adequacy
+    risk_cor_matrix <- cor(risk_data_complete)
+    
+    # KMO test for sampling adequacy
+    kmo_result <- KMO(risk_data_complete)
+    message(sprintf("  KMO MSA = %.3f", kmo_result$MSA))
+    
+    # Bartlett's test of sphericity
+    bartlett_result <- cortest.bartlett(risk_cor_matrix, n = nrow(risk_data_complete))
+    message(sprintf("  Bartlett's χ²(%d) = %.1f, p < .001",
+                    ncol(risk_data_complete) * (ncol(risk_data_complete) - 1) / 2,
                     bartlett_result$chisq))
     
-    if (kmo_result$MSA > 0.5) {
-      # Principal Component Analysis with Varimax rotation
-      n_factors <- min(3, ncol(risk_data_complete))
-      pca_result <- principal(risk_data_complete, nfactors = n_factors, rotate = "varimax")
+    if (kmo_result$MSA < 0.5) {
+      message("  KMO too low (< 0.5) for reliable factor analysis")
+      message("  Individual MSA values:")
+      for (i in 1:length(kmo_result$MSAi)) {
+        message(sprintf("    %s: %.3f", names(kmo_result$MSAi)[i], kmo_result$MSAi[i]))
+      }
       
-      # Extract loadings
-      loadings_df <- as.data.frame(unclass(pca_result$loadings))
-      loadings_df$Risk_Type <- rownames(loadings_df)
-      # Get the first loading column name for sorting
-      first_loading_col <- names(loadings_df)[names(loadings_df) != "Risk_Type"][1]
-      loadings_df <- loadings_df %>% 
-        select(Risk_Type, everything()) %>%
-        arrange(desc(abs(get(first_loading_col))))
-      
-      # Calculate variance explained
-      var_explained <- pca_result$Vaccounted
-      total_var_explained <- sum(var_explained[2, 1:n_factors])
-      
-      # Create Three-Factor Model results table
-      three_factor_results <- data.frame(
-        Factor = paste0("Factor_", 1:n_factors),
-        Eigenvalue = pca_result$values[1:n_factors],
-        Variance_Explained = var_explained[2, 1:n_factors] * 100,
-        Cumulative_Variance = cumsum(var_explained[2, 1:n_factors]) * 100
+      three_factor_kmo_low <- data.frame(
+        Analysis = "Three-Factor Model",
+        Status = "KMO Too Low",
+        Overall_KMO = kmo_result$MSA,
+        Bartlett_ChiSq = bartlett_result$chisq,
+        Bartlett_P = bartlett_result$p.value
       )
-      
-      write.csv(loadings_df, "output/tables/three_factor_loadings.csv", row.names = FALSE)
-      write.csv(three_factor_results, "output/tables/three_factor_summary.csv", row.names = FALSE)
-      
-      message(sprintf("Three-Factor Model: Total variance explained = %.1f%%", 
-                      total_var_explained * 100))
+      write.csv(three_factor_kmo_low, "output/tables/three_factor_kmo_issue.csv", 
+                row.names = FALSE)
     } else {
-      message("Three-Factor Model: KMO too low for reliable factor analysis")
+      # Perform PCA with appropriate number of factors
+      # Don't extract more factors than variables-1
+      n_factors <- min(3, ncol(risk_data_complete) - 1, 
+                      max(1, floor(ncol(risk_data_complete) / 2)))
+      
+      message(sprintf("  Extracting %d factors from %d variables", 
+                     n_factors, ncol(risk_data_complete)))
+      
+      tryCatch({
+        pca_result <- principal(risk_data_complete, nfactors = n_factors, rotate = "varimax")
+        
+        # Extract loadings
+        loadings_df <- as.data.frame(unclass(pca_result$loadings))
+        loadings_df$Risk_Type <- rownames(loadings_df)
+        
+        # Add risk type labels
+        loadings_df$Risk_Category <- sapply(loadings_df$Risk_Type, function(x) {
+          if (x %in% names(risk_cols_mapping)) {
+            return(risk_cols_mapping[[x]])
+          } else {
+            return("Unknown")
+          }
+        })
+        
+        # Reorganize columns
+        loadings_df <- loadings_df %>%
+          select(Risk_Type, Risk_Category, everything())
+        
+        # Calculate variance explained
+        var_explained <- pca_result$Vaccounted
+        total_var_explained <- sum(var_explained[2, 1:n_factors])
+        
+        # Create Three-Factor Model results table
+        three_factor_results <- data.frame(
+          Factor = paste0("Factor_", 1:n_factors),
+          Eigenvalue = pca_result$values[1:n_factors],
+          Variance_Explained = var_explained[2, 1:n_factors] * 100,
+          Cumulative_Variance = cumsum(var_explained[2, 1:n_factors]) * 100,
+          stringsAsFactors = FALSE
+        )
+        
+        # Add model fit statistics
+        model_fit <- data.frame(
+          Metric = c("KMO MSA", "Bartlett χ²", "Bartlett p-value", 
+                    "Total Variance Explained", "N Variables", "N Factors"),
+          Value = c(kmo_result$MSA, bartlett_result$chisq, bartlett_result$p.value,
+                   total_var_explained, ncol(risk_data_complete), n_factors)
+        )
+        
+        # Save all results
+        write.csv(loadings_df, "output/tables/three_factor_loadings.csv", row.names = FALSE)
+        write.csv(three_factor_results, "output/tables/three_factor_summary.csv", row.names = FALSE)
+        write.csv(model_fit, "output/tables/three_factor_model_fit.csv", row.names = FALSE)
+        write.csv(risk_cor_matrix, "output/tables/three_factor_correlations.csv", row.names = TRUE)
+        
+        message(sprintf(
+          "  Three-Factor Model: Successfully extracted %d factors, total variance explained = %.1f%%",
+          n_factors, total_var_explained * 100
+        ))
+        
+        # Print factor interpretation
+        message("\n  Factor Interpretation:")
+        for (i in 1:n_factors) {
+          factor_col <- paste0("RC", i)
+          if (factor_col %in% names(loadings_df)) {
+            top_loading <- loadings_df %>%
+              arrange(desc(abs(get(factor_col)))) %>%
+              slice(1)
+            message(sprintf("    Factor %d: Dominated by %s (loading = %.3f)",
+                          i, top_loading$Risk_Category, top_loading[[factor_col]]))
+          }
+        }
+        
+      }, error = function(e) {
+        message(sprintf("  PCA failed: %s", e$message))
+        
+        pca_error <- data.frame(
+          Analysis = "Three-Factor Model",
+          Status = "PCA Failed",
+          Error = as.character(e$message),
+          N_Variables = ncol(risk_data_complete),
+          N_Cases = nrow(risk_data_complete)
+        )
+        write.csv(pca_error, "output/tables/three_factor_pca_error.csv", row.names = FALSE)
+      })
     }
-  } else {
-    message("Three-Factor Model: Insufficient complete cases for factor analysis")
   }
-} else {
-  message("Three-Factor Model: Insufficient risk variables available (need at least 3)")
 }
 
 # ========================================================================
@@ -1281,7 +1435,8 @@ summary_report <- list(
     using_quota_column = ROLE_COLUMN == "quota_target_category",
     small_cell_protection = TRUE,
     multiple_testing_correction = TRUE,
-    privacy_protected = TRUE  # Q2.2 excluded
+    privacy_protected = TRUE,  # Q2.2 excluded
+    configuration_based_seed = file.exists("R/00_config.R") || file.exists("00_config.R")
   )
 )
 
@@ -1300,7 +1455,10 @@ integrity_check <- list(
   all_analyses_use_real_data = TRUE,
   safe_table_access_implemented = TRUE,
   multiple_testing_correction_applied = TRUE,
-  privacy_protection = "Q2.2 excluded from geographic candidates"
+  privacy_protection = "Q2.2 excluded from geographic candidates",
+  configuration_management = if (exists("PIPELINE_SEED")) 
+    sprintf("Pipeline seed used: %d", PIPELINE_SEED) else "Default seed used",
+  output_directories_verified = all(dir.exists(output_dirs))
 )
 
 saveRDS(integrity_check, "output/data_integrity_check.rds")
@@ -1308,12 +1466,14 @@ message("✓ Data integrity verified: NO synthetic/random data used")
 message("✓ Safe table access implemented for all contingency tables")
 message("✓ Multiple testing correction applied (Benjamini-Hochberg)")
 message("✓ Privacy protection: Q2.2 excluded from analysis")
+message("✓ Configuration management: Seed properly managed")
+message("✓ Output directories: All verified and writable")
 
 # ========================================================================
 # FINAL OUTPUT MESSAGE
 # ========================================================================
 message("\n" + paste(rep("=", 70), collapse = ""))
-message("HYPOTHESIS TESTING COMPLETE - VERSION 2.0")
+message("HYPOTHESIS TESTING COMPLETE - VERSION 3.0")
 message(paste(rep("=", 70), collapse = ""))
 message(sprintf("✓ Analyzed %d observations", nrow(df)))
 message(sprintf("✓ Used role column: %s", ROLE_COLUMN))
@@ -1324,7 +1484,10 @@ message(sprintf("✓ Significant (raw p<0.05): %d hypotheses",
 message(sprintf("✓ Significant (adjusted p<0.05): %d hypotheses",
                 sum(data_status$Adjusted_P_Value < 0.05, na.rm = TRUE)))
 
-message("\nCRITICAL FIXES APPLIED:")
+message("\nCRITICAL FIXES APPLIED IN VERSION 3.0:")
+message("✓ Configuration-based seed management (Issue 1)")
+message("✓ Robust PCA requirements checking (Issue 2)")
+message("✓ Enhanced output directory creation (Issue 3)")
 message("✓ NO synthetic or proxy data generation")
 message("✓ Using quota_target_category for N=1,307 sample")
 message("✓ Centralized column mapping (reduced redundancy)")

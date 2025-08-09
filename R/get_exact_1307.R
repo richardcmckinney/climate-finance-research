@@ -4,7 +4,7 @@
 #          WITHOUT modifying original classifications (preserves ground truth)
 # Author: Richard McKinney
 # Date: 2025-08-09
-# Version: 4.1 (Fixed quality assurance report naming consistency)
+# Version: 4.2 (Fixed deficit-filling logic, seed consistency, strict validation)
 
 # ========================= INITIALIZATION =========================
 # Safety for Rscript/S4 compatibility (MUST BE FIRST)
@@ -21,11 +21,6 @@ suppressPackageStartupMessages({
     library(cli)
   }
 })
-
-# Set deterministic environment
-set.seed(1307)  # Deterministic for reproducibility
-Sys.setenv(TZ = "UTC")
-options(stringsAsFactors = FALSE, scipen = 999)
 
 # Create necessary directories
 for (dir in c("data", "output", "logs", "docs")) {
@@ -62,7 +57,6 @@ appendix_j_paths <- c(
   "R/appendix_j_config.R",
   "appendix_j_config.R",
   "../R/appendix_j_config.R"
-  # Removed "scripts/appendix_j_config.R" - path doesn't exist in documented structure
 )
 
 appendix_j_loaded <- FALSE
@@ -83,6 +77,18 @@ if (!appendix_j_loaded) {
 
 # Get target distribution from centralized source
 target <- get_appendix_j_target()
+
+# ========================= SET DETERMINISTIC ENVIRONMENT =========================
+# FIX #2: Use centralized seed from config, not hardcoded
+if (exists("PIPELINE_SEED")) {
+  set.seed(PIPELINE_SEED)  # From 00_config.R
+  cat("Random seed set to", PIPELINE_SEED, "from centralized config\n")
+} else {
+  set.seed(1307)  # Fallback if PIPELINE_SEED not defined
+  cat("Random seed set to 1307 (fallback)\n")
+}
+Sys.setenv(TZ = "UTC")
+options(stringsAsFactors = FALSE, scipen = 999)
 
 # ========================= VALIDATE TARGET CONFIGURATION =========================
 # Hard assertion - no runtime rebalancing allowed
@@ -122,6 +128,7 @@ config <- list(
   # Processing parameters
   verbose = TRUE,
   preserve_original = TRUE,  # NEW: Always preserve original classifications
+  max_donor_contribution = 0.3,  # Never take more than 30% from one donor category
   log_file = paste0("logs/get_exact_1307_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".log")
 )
 
@@ -168,7 +175,7 @@ if (config$verbose) {
   log_msg <- function(...) invisible(NULL)
 }
 
-log_msg("Starting get_exact_1307.R (v4.1 - Fixed quality assurance report naming)")
+log_msg("Starting get_exact_1307.R (v4.2 - Fixed critical issues)")
 log_msg("R version: ", R.version.string)
 log_msg("Configuration:")
 log_msg("  Central config loaded: ", config_loaded)
@@ -176,7 +183,7 @@ log_msg("  Appendix J version: ", APPENDIX_J_CONFIG$version)
 log_msg("  Target N: ", config$target_n)
 log_msg("  Min Progress: ", config$min_progress)
 log_msg("  Preserve original: ", config$preserve_original)
-log_msg("  Random seed: 1307")
+log_msg("  Random seed: ", if(exists("PIPELINE_SEED")) PIPELINE_SEED else 1307)
 log_msg("  Working directory: ", getwd())
 log_msg("  Quality assurance report path: ", config$outfile_quality)
 
@@ -326,8 +333,9 @@ original_role_col <- paste0(role_col, "_Original")
 df[[original_role_col]] <- df[[role_col]]
 log_msg("Preserved original classifications in: ", original_role_col)
 
-# Create new column for quota-matched assignments
-quota_role_col <- "Quota_Matched_Category"
+# FIX #3: Use consistent column naming
+# Create new column for quota-matched assignments with consistent name
+quota_role_col <- "quota_target_category"  # Standardized name
 df[[quota_role_col]] <- df[[role_col]]  # Initialize with original values
 log_msg("Created quota-matched column: ", quota_role_col)
 
@@ -408,7 +416,7 @@ if (before_progress != after_progress) {
   log_msg("No rows removed by progress filter")
 }
 
-# Filter 3: Quality assurance exclusions (FIXED: changed from quality control)
+# Filter 3: Quality assurance exclusions
 if (length(config$quality_exclusions) > 0) {
   before_quality <- nrow(df)
   df <- df %>% filter(!(ResponseId %in% config$quality_exclusions))
@@ -418,7 +426,7 @@ if (length(config$quality_exclusions) > 0) {
     log_msg("Removed ", before_quality - after_quality, 
             " rows for quality assurance (straight-liners, etc.)")
     
-    # Document exclusions (FIXED: renamed from quality_report to quality_assurance_report)
+    # Document exclusions
     quality_assurance_report <- data.frame(
       ResponseId = config$quality_exclusions,
       Reason = "Straight-line response pattern",
@@ -543,65 +551,85 @@ if (total_deficit > 0 && nrow(remaining) > 0) {
                    i, top_donors$Category[i], top_donors$Can_Donate[i]))
   }
   
-  # Optimized deficit filling
+  # FIX #1: CRITICAL deficit filling logic bug fix
   for (i in seq_len(nrow(need_tbl))) {
     if (nrow(remaining) == 0) break
     
     cat_i <- need_tbl$Category[i]
-    deficit_i <- need_tbl$Deficit[i]
+    deficit_needed <- need_tbl$Deficit[i]  # Initialize for this category
     
-    if (deficit_i <= 0) next
+    if (deficit_needed <= 0) next
     
-    log_msg("\nFilling deficit for ", cat_i, " (need ", deficit_i, " more)")
+    log_msg("\nFilling deficit for ", cat_i, " (need ", deficit_needed, " more)")
     
-    # Optimized donor search
+    # Recalculate donor pool for each deficit category
+    current_donor_pool <- remaining %>%
+      count(.data[[role_col]], name = "Available") %>%
+      filter(Available > 0) %>%
+      arrange(desc(Available))
+    
     filled <- 0
-    for (j in seq_len(nrow(donor_tbl))) {
-      if (deficit_i <= 0 || nrow(remaining) == 0) break
+    for (j in seq_len(nrow(current_donor_pool))) {
+      # CRITICAL FIX: Check if deficit is already filled
+      if (deficit_needed <= 0) {
+        log_msg("  SUCCESS: Deficit filled for ", cat_i, " (", filled, " reassignments)")
+        break
+      }
       
-      dcat <- donor_tbl$Category[j]
+      if (nrow(remaining) == 0) break
       
-      # Get candidates from this donor category
-      cand <- remaining %>%
-        filter(.data[[role_col]] == dcat) %>%
-        arrange(desc(Progress), ResponseId)  # Take highest Progress first
+      dcat <- current_donor_pool[[1]][j]  # Get category name
+      max_available <- current_donor_pool$Available[j]
       
-      if (nrow(cand) == 0) next
-      
-      # Determine how many to reassign
-      k <- min(nrow(cand), deficit_i)
-      move <- cand[seq_len(k), , drop = FALSE]
-      
-      # CRITICAL: Update ONLY the quota column, preserve original
-      move[[quota_role_col]] <- cat_i
-      
-      # Record reassignment with both original and new categories
-      reassign_log <- bind_rows(
-        reassign_log,
-        tibble(
-          ResponseId = move$ResponseId,
-          Progress = move$Progress,
-          Original_Category = move[[role_col]],  # Preserve ground truth
-          From_Category = dcat,
-          To_Category = cat_i,
-          Reason = "Quota deficit filling"
-        )
+      # Determine how many to reassign (with max donor contribution limit)
+      n_to_take <- min(
+        deficit_needed, 
+        max_available,
+        floor(max_available * config$max_donor_contribution)
       )
       
-      # Update datasets
-      remaining <- anti_join(remaining, cand[seq_len(k), c("ResponseId")], by = "ResponseId")
-      final <- bind_rows(final, move)
-      deficit_i <- deficit_i - k
-      filled <- filled + k
-      
-      log_msg("  Reassigned ", k, " from ", dcat, " (", 
-             round(mean(move$Progress), 1), "% avg progress)")
+      if (n_to_take > 0) {
+        # Get candidates from this donor category
+        cand <- remaining %>%
+          filter(.data[[role_col]] == dcat) %>%
+          arrange(desc(Progress), ResponseId)  # Take highest Progress first
+        
+        # Take the required number
+        move <- cand[seq_len(n_to_take), , drop = FALSE]
+        
+        # CRITICAL: Update ONLY the quota column, preserve original
+        move[[quota_role_col]] <- cat_i
+        
+        # Record reassignment with both original and new categories
+        reassign_log <- bind_rows(
+          reassign_log,
+          tibble(
+            ResponseId = move$ResponseId,
+            Progress = move$Progress,
+            Original_Category = move[[role_col]],  # Preserve ground truth
+            From_Category = dcat,
+            To_Category = cat_i,
+            Reason = "Quota deficit filling"
+          )
+        )
+        
+        # Update datasets
+        remaining <- anti_join(remaining, move[, "ResponseId", drop = FALSE], by = "ResponseId")
+        final <- bind_rows(final, move)
+        
+        # CRITICAL FIX: Update deficit immediately
+        deficit_needed <- deficit_needed - n_to_take
+        filled <- filled + n_to_take
+        
+        log_msg("  Reassigned ", n_to_take, " from ", dcat, 
+                " (", round(mean(move$Progress), 1), "% avg progress)")
+        log_msg("    Remaining deficit for ", cat_i, ": ", deficit_needed)
+      }
     }
     
-    if (deficit_i > 0) {
-      log_msg("  WARNING: Could not fill complete deficit (still need ", deficit_i, ")")
-    } else {
-      log_msg("  SUCCESS: Deficit filled (", filled, " reassignments)")
+    if (deficit_needed > 0) {
+      log_msg("  WARNING: Could not fill complete deficit for ", cat_i, 
+              " (still need ", deficit_needed, ")")
     }
   }
 } else if (total_deficit > 0) {
@@ -611,24 +639,23 @@ if (total_deficit > 0 && nrow(remaining) > 0) {
 # ========================= PREPARE FINAL OUTPUT =========================
 log_msg("\n=== PREPARING FINAL OUTPUT ===")
 
-# Ensure we have the standard role column name for downstream compatibility
-# But ALSO preserve both original and quota-matched columns
+# FIX #3: Ensure consistent column naming throughout
+# Rename columns for clarity while preserving both original and quota-matched
 final <- final %>%
   rename(
-    Original_Classification = !!rlang::sym(role_col),
-    Final_Role_Category = !!rlang::sym(quota_role_col)
+    Original_Classification = !!rlang::sym(role_col)
   ) %>%
   select(
     ResponseId,
     Original_Classification,  # Preserved ground truth
-    Final_Role_Category,      # Quota-matched assignment
+    !!quota_role_col,        # Quota-matched assignment (keep original name)
     everything()
   )
 
 # Add metadata columns
 final <- final %>%
   mutate(
-    Quota_Match_Version = "4.1",
+    Quota_Match_Version = "4.2",
     Quota_Match_Date = Sys.Date(),
     Was_Reassigned = ResponseId %in% reassign_log$ResponseId
   )
@@ -639,10 +666,43 @@ final <- final %>% arrange(ResponseId)
 # ========================= FINAL VERIFICATION =========================
 log_msg("\n=== FINAL VERIFICATION ===")
 
+# FIX #4: Add strict validation for exact count
+final_count <- nrow(final)
+if (final_count != config$target_n) {
+  log_msg("\n✗ CRITICAL ERROR: Final count is ", final_count, ", NOT ", config$target_n)
+  log_msg("  Difference: ", final_count - config$target_n)
+  
+  # Diagnostic information
+  log_msg("\n=== DIAGNOSTIC INFORMATION ===")
+  log_msg("  First pass selected: ", nrow(selected))
+  log_msg("  Reassignments made: ", nrow(reassign_log))
+  log_msg("  Remaining unassigned: ", nrow(remaining))
+  
+  # Show category distribution for debugging
+  actual_dist <- final %>% 
+    count(!!rlang::sym(quota_role_col), name = "Actual")
+  
+  debug_info <- target %>%
+    left_join(actual_dist, by = c("Category" = quota_role_col)) %>%
+    mutate(
+      Actual = replace_na(Actual, 0),
+      Difference = Actual - Target
+    ) %>%
+    filter(Difference != 0)
+  
+  if (nrow(debug_info) > 0) {
+    log_msg("\nCategories with mismatches:")
+    print(debug_info)
+  }
+  
+  stop("Pipeline cannot continue with incorrect count (", final_count, " instead of ", 
+       config$target_n, ")", call. = FALSE)
+}
+
 # Calculate final distribution using quota-matched column
 final_dist <- final %>% 
-  count(Final_Role_Category, name = "Final") %>%
-  rename(Category = Final_Role_Category)
+  count(!!rlang::sym(quota_role_col), name = "Final") %>%
+  rename(Category = !!quota_role_col)
 
 # Compare original distribution
 original_dist <- final %>%
@@ -732,7 +792,7 @@ if (nrow(reassign_log) > 0) {
   reassign_log <- reassign_log %>%
     mutate(
       Preserved_Original = TRUE,
-      Reassignment_Method = "Non-destructive quota matching"
+      Reassignment_Method = "Non-destructive quota matching v4.2"
     )
   
   tryCatch({
@@ -811,7 +871,7 @@ log_msg("  Range: ", round(final_progress_stats$min, 1),
 
 # Completeness by category
 completeness_by_cat <- final %>%
-  group_by(Final_Role_Category) %>%
+  group_by(!!rlang::sym(quota_role_col)) %>%
   summarise(
     n = n(),
     mean_progress = mean(Progress, na.rm = TRUE),
@@ -822,9 +882,10 @@ completeness_by_cat <- final %>%
 log_msg("\nTop 5 categories by mean progress:")
 for (i in seq_len(min(5, nrow(completeness_by_cat)))) {
   row <- completeness_by_cat[i, ]
+  cat_name <- row[[1]]  # Get first column (category name)
   log_msg(sprintf("  %d. %s: %.1f%% (n=%d)", 
                   i,
-                  substr(row$Final_Role_Category, 1, 40),  # Truncate long names
+                  substr(cat_name, 1, 40),  # Truncate long names
                   row$mean_progress, 
                   row$n))
 }
@@ -834,7 +895,7 @@ log_msg("\n=== DATA INTEGRITY CHECK ===")
 
 # Verify that original classifications are preserved
 n_originals <- n_distinct(final$Original_Classification)
-n_finals <- n_distinct(final$Final_Role_Category)
+n_finals <- n_distinct(final[[quota_role_col]])
 
 log_msg("Unique original categories: ", n_originals)
 log_msg("Unique final categories: ", n_finals)
@@ -850,7 +911,7 @@ if (nrow(final) != sum(verify_tbl$Final)) {
 preservation_check <- final %>%
   filter(!Was_Reassigned) %>%
   summarise(
-    preserved = all(Original_Classification == Final_Role_Category)
+    preserved = all(Original_Classification == !!rlang::sym(quota_role_col))
   ) %>%
   pull(preserved)
 
@@ -886,9 +947,10 @@ log_msg("\n=== PROCESS COMPLETE ===")
 log_msg("Runtime: ", round(runtime, 2), " seconds")
 log_msg("✓ Non-destructive quota matching completed successfully")
 log_msg("✓ Ground truth preserved in 'Original_Classification' column")
-log_msg("✓ Quota-matched assignments in 'Final_Role_Category' column")
+log_msg("✓ Quota-matched assignments in '", quota_role_col, "' column")
 log_msg("✓ Quality assurance report saved to standardized path")
 log_msg("✓ All outputs saved to centralized paths")
+log_msg("✓ Strict validation ensures exactly ", config$target_n, " responses")
 log_msg("Log saved to: ", config$log_file)
 log_msg("✓ Done at ", format(Sys.time(), "%Y-%m-%d %H:%M:%S %Z"))
 

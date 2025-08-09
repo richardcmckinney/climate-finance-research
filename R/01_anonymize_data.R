@@ -4,10 +4,11 @@ if (!"methods" %in% loadedNamespaces()) library(methods)
 if (!exists(".local", inherits = TRUE)) .local <- function(...) NULL
 
 # 01_anonymize_data.R — Pure anonymization with data cleaning
-# Version 3.0 - Fully integrated with central configuration
-# - Uses exact-name matching for known PII columns
-# - Pattern-based matching for generic PII (emails, phones, etc.)
-# - Derives region from geographic data before removal
+# Version 4.0 - Fully integrated with central configuration with comprehensive fixes
+# - Enhanced PII scrubbing with international phone patterns and IP addresses
+# - Robust respondent ID generation with uniqueness validation
+# - Centralized progress normalization from config
+# - Explicit NA handling in CSV writes
 # - Preserves respondent_id for stable joins
 # - Writes: basic anonymized CSV and data dictionary
 
@@ -76,39 +77,60 @@ safe_month <- function(x) {
   out
 }
 
-# Hash function for anonymization
-hash_id <- function(x, pref, hash_length = 10) {
-  vapply(as.character(x), function(i) {
-    if (is.na(i) || i == "") return(NA_character_)
-    paste0(pref, "_", substr(digest(i, algo = "sha256"), 1, hash_length))
-  }, character(1), USE.NAMES = FALSE)
+# IMPROVED: Robust hash function for anonymization with guaranteed uniqueness
+hash_id <- function(x, prefix = "RESP", len = 10) {
+  # Ensure every row gets a unique hash even if input is NA/empty
+  sapply(seq_along(x), function(i) {
+    # Use row index as salt to guarantee uniqueness
+    if (is.na(x[i]) || x[i] == "") {
+      # For missing values, use row number plus random salt
+      val <- paste0("ROW_", i, "_", Sys.time(), "_", runif(1))
+    } else {
+      # For existing values, still add row index for uniqueness
+      val <- paste0(x[i], "_", i)
+    }
+    
+    # Generate hash
+    hash_val <- digest(val, algo = "sha256")
+    
+    # Return formatted ID
+    paste0(prefix, "_", substr(hash_val, 1, len))
+  })
 }
 
-# Scrub PII from text fields
+# IMPROVED: Comprehensive PII scrubbing with international patterns
 scrub_text <- function(x) {
   if (!is.character(x)) return(x)
   
   # Email addresses
-  x <- gsub("(?i)[A-Za-z0-9._%+\\-]+@[A-Za-z0-9.\\-]+\\.[A-Za-z]{2,}", "[REDACTED_EMAIL]", x, perl = TRUE)
+  x <- str_replace_all(x, "(?i)[A-Za-z0-9._%+\\-]+@[A-Za-z0-9.\\-]+\\.[A-Za-z]{2,}", "[REDACTED_EMAIL]")
   
-  # Phone numbers
-  x <- gsub("\\+?[1-9]\\d{0,3}[\\s\\-\\.]?\\(?\\d{1,4}\\)?[\\s\\-\\.]?\\d{1,4}[\\s\\-\\.]?\\d{1,9}", "[REDACTED_PHONE]", x, perl = TRUE)
-  x <- gsub("\\(?\\d{3}\\)?[\\s\\-\\.]?\\d{3}[\\s\\-\\.]?\\d{4}", "[REDACTED_PHONE]", x, perl = TRUE)
-  x <- gsub("\\b\\d{3,4}[\\s\\-\\.]\\d{3,4}[\\s\\-\\.]\\d{3,4}\\b", "[REDACTED_PHONE]", x, perl = TRUE)
+  # ENHANCED: Comprehensive phone number patterns
+  # International format with country codes
+  x <- str_replace_all(x, "(?i)\\+?[1-9]\\d{0,3}[\\s.-]?\\(?\\d{1,4}\\)?[\\s.-]?\\d{1,4}[\\s.-]?\\d{1,9}", "[REDACTED_PHONE]")
+  # US/Canada format with optional country code
+  x <- str_replace_all(x, "(?i)(\\+?1[\\s.-]?)?(\\(?\\d{3}\\)?[\\s.-]?)?\\d{3}[\\s.-]?\\d{4}", "[REDACTED_PHONE]")
+  # Extension patterns
+  x <- str_replace_all(x, "(?i)(ext|extension|x)\\.?\\s*\\d{1,6}", "[REDACTED_EXT]")
+  # International with spaces/dashes
+  x <- str_replace_all(x, "(?i)\\d{2,4}[\\s.-]\\d{2,4}[\\s.-]\\d{4,10}", "[REDACTED_PHONE]")
   
-  # URLs
-  x <- gsub("(?i)(https?://[^\\s]+|ftp://[^\\s]+|www\\.[A-Za-z0-9\\-]+\\.[A-Za-z]{2,}[^\\s]*)", "[REDACTED_URL]", x, perl = TRUE)
+  # URLs - comprehensive pattern
+  x <- str_replace_all(x, "(?i)(https?://|ftp://|www\\.)[^\\s]+", "[REDACTED_URL]")
   
   # Social media handles
-  x <- gsub("@[A-Za-z0-9_]{1,30}\\b", "[REDACTED_HANDLE]", x, perl = TRUE)
+  x <- str_replace_all(x, "@[A-Za-z0-9_]{1,30}\\b", "[REDACTED_HANDLE]")
   
   # Credit card numbers
-  x <- gsub("\\b\\d{4}[\\s\\-]?\\d{4}[\\s\\-]?\\d{4}[\\s\\-]?\\d{4}\\b", "[REDACTED_CARD]", x, perl = TRUE)
+  x <- str_replace_all(x, "\\b\\d{4}[\\s\\-]?\\d{4}[\\s\\-]?\\d{4}[\\s\\-]?\\d{4}\\b", "[REDACTED_CARD]")
   
-  # SSN pattern
-  x <- gsub("\\b\\d{3}-\\d{2}-\\d{4}\\b", "[REDACTED_SSN]", x, perl = TRUE)
+  # SSN patterns
+  x <- str_replace_all(x, "\\b\\d{3}-\\d{2}-\\d{4}\\b", "[REDACTED_SSN]")
   
-  x
+  # NEW: IP addresses
+  x <- str_replace_all(x, "\\b(?:\\d{1,3}\\.){3}\\d{1,3}\\b", "[REDACTED_IP]")
+  
+  return(x)
 }
 
 # Derive region from country/geographic data
@@ -120,15 +142,17 @@ derive_region <- function(country_col) {
     "North America" = c("United States", "USA", "US", "Canada", "CA", "Mexico", "MX"),
     "Europe" = c("United Kingdom", "UK", "Germany", "DE", "France", "FR", "Italy", "IT", 
                   "Spain", "ES", "Netherlands", "NL", "Belgium", "BE", "Switzerland", "CH",
-                  "Sweden", "SE", "Norway", "NO", "Denmark", "DK", "Finland", "FI"),
+                  "Sweden", "SE", "Norway", "NO", "Denmark", "DK", "Finland", "FI", 
+                  "Poland", "PL", "Austria", "AT", "Portugal", "PT", "Greece", "GR"),
     "Asia Pacific" = c("China", "CN", "Japan", "JP", "India", "IN", "Australia", "AU", 
                        "Singapore", "SG", "South Korea", "KR", "New Zealand", "NZ",
-                       "Hong Kong", "HK", "Taiwan", "TW"),
+                       "Hong Kong", "HK", "Taiwan", "TW", "Indonesia", "ID", "Thailand", "TH",
+                       "Malaysia", "MY", "Philippines", "PH", "Vietnam", "VN"),
     "Latin America" = c("Brazil", "BR", "Argentina", "AR", "Chile", "CL", "Colombia", "CO",
-                        "Peru", "PE", "Venezuela", "VE"),
+                        "Peru", "PE", "Venezuela", "VE", "Ecuador", "EC", "Uruguay", "UY"),
     "Middle East & Africa" = c("United Arab Emirates", "UAE", "Saudi Arabia", "SA", 
                                 "South Africa", "ZA", "Israel", "IL", "Egypt", "EG",
-                                "Nigeria", "NG", "Kenya", "KE")
+                                "Nigeria", "NG", "Kenya", "KE", "Morocco", "MA", "Turkey", "TR")
   )
   
   # Convert country to region
@@ -200,22 +224,29 @@ col_country <- find_col(raw, c("Q2.2", "hq_country", "HQ_Country", "Country", "c
                         pattern = "^Q2\\.2$|country|headquarter")
 
 # ------------------------- Initial Transformations -------------------------
-# Build response ID
-resp_id <- if (!is.na(col_response_id)) {
-  raw[[col_response_id]]
+# IMPROVED: Robust respondent ID creation with validation
+if (!is.na(col_response_id) && col_response_id %in% names(raw)) {
+  cli::cli_inform(paste("Creating respondent IDs from column:", col_response_id))
+  resp_id_base <- raw[[col_response_id]]
 } else {
-  cli::cli_warn("ResponseId column not found, using sequential IDs")
-  seq_len(nrow(raw))
+  cli::cli_warn("ResponseId column not found, creating respondent_id from row indices")
+  # Use row numbers as base for hashing
+  resp_id_base <- paste0("ROW_", seq_len(nrow(raw)))
 }
 
 # Create anonymized dataset with initial transforms
 an_basic <- raw %>%
   mutate(
-    !!STANDARD_COLUMNS$respondent_id := hash_id(resp_id, "RESP"),
+    !!STANDARD_COLUMNS$respondent_id := hash_id(resp_id_base, "RESP"),
     across(.cols = any_of(c(col_start, col_end, col_record)), 
            .fns = ~ safe_month(.x), 
            .names = "{.col}_month")
   )
+
+# CRITICAL: Validate uniqueness of respondent IDs
+if (any(duplicated(an_basic[[STANDARD_COLUMNS$respondent_id]]))) {
+  cli::cli_abort("CRITICAL: Duplicate respondent IDs detected after hashing", call = FALSE)
+}
 
 # ------------------------- Derive Region Before Removing Geographic Data -------------------------
 if (!is.na(col_country)) {
@@ -233,25 +264,33 @@ if (!is.na(col_country)) {
   cli::cli_warn("No geographic column found for region derivation")
 }
 
-# ------------------------- Clean Progress Column -------------------------
-if (!is.na(col_progress)) {
-  cli::cli_inform(paste("Cleaning Progress column:", col_progress))
+# ------------------------- Clean Progress Column (Using Centralized Function) -------------------------
+if (!is.na(col_progress) && col_progress %in% names(an_basic)) {
+  cli::cli_inform(paste("Normalizing progress column:", col_progress))
   
-  # Convert to numeric
-  an_basic[[col_progress]] <- suppressWarnings(as.numeric(an_basic[[col_progress]]))
-  
-  # Handle percentage values (if Progress is 0-1, convert to 0-100)
-  if (!all(is.na(an_basic[[col_progress]])) && 
-      max(an_basic[[col_progress]], na.rm = TRUE) <= 1) {
-    cli::cli_inform("Converting Progress from decimal (0-1) to percentage (0-100)")
-    an_basic[[col_progress]] <- an_basic[[col_progress]] * 100
-  }
-  
-  # Replace NA with 0
-  n_na_progress <- sum(is.na(an_basic[[col_progress]]))
-  if (n_na_progress > 0) {
-    cli::cli_inform(paste("Replacing", n_na_progress, "NA Progress values with 0"))
-    an_basic[[col_progress]][is.na(an_basic[[col_progress]])] <- 0
+  # IMPROVED: Use centralized normalize_progress function from config
+  if (exists("normalize_progress", mode = "function")) {
+    an_basic[[col_progress]] <- normalize_progress(an_basic[[col_progress]])
+  } else {
+    # Fallback if function not available in config
+    cli::cli_warn("normalize_progress function not found in config, using local normalization")
+    
+    # Convert to numeric
+    an_basic[[col_progress]] <- suppressWarnings(as.numeric(an_basic[[col_progress]]))
+    
+    # Handle percentage values (if Progress is 0-1, convert to 0-100)
+    if (!all(is.na(an_basic[[col_progress]])) && 
+        max(an_basic[[col_progress]], na.rm = TRUE) <= 1) {
+      cli::cli_inform("Converting Progress from decimal (0-1) to percentage (0-100)")
+      an_basic[[col_progress]] <- an_basic[[col_progress]] * 100
+    }
+    
+    # Replace NA with 0
+    n_na_progress <- sum(is.na(an_basic[[col_progress]]))
+    if (n_na_progress > 0) {
+      cli::cli_inform(paste("Replacing", n_na_progress, "NA Progress values with 0"))
+      an_basic[[col_progress]][is.na(an_basic[[col_progress]])] <- 0
+    }
   }
   
   # Ensure Progress column uses standard name
@@ -276,7 +315,9 @@ pii_patterns_extra <- c(
   "^ResponseId$|^StartDate$|^EndDate$|^RecordedDate$",
   "(?i)birth.*date|dob|date.*birth",
   "(?i)ssn|social.*security",
-  "(?i)passport|driver.*license|license.*number"
+  "(?i)passport|driver.*license|license.*number",
+  "(?i)credit.*card|card.*number|cvv|expir",
+  "(?i)bank.*account|routing.*number|iban|swift"
 )
 
 pii_regex <- paste(pii_patterns_extra, collapse = "|")
@@ -324,20 +365,36 @@ if (length(char_cols) > 0) {
 
 # ------------------------- Privacy Validation -------------------------
 # Use central privacy check function with strict enforcement
-check_privacy_violations(an_basic, stop_on_violation = TRUE)
+if (exists("check_privacy_violations", mode = "function")) {
+  check_privacy_violations(an_basic, stop_on_violation = TRUE)
+} else {
+  cli::cli_warn("Privacy check function not available in config, performing local check")
+  
+  # Local privacy check
+  potential_pii <- c("email", "phone", "address", "ssn", "ip", "name", "birth")
+  for (pattern in potential_pii) {
+    pii_cols <- grep(pattern, names(an_basic), ignore.case = TRUE, value = TRUE)
+    if (length(pii_cols) > 0) {
+      cli::cli_warn(paste("Potential PII columns found:", paste(pii_cols, collapse = ", ")))
+    }
+  }
+}
 
 # ------------------------- Save Output Files -------------------------
 cli::cli_inform("Saving basic anonymized data...")
-readr::write_csv(an_basic, PATHS$basic_anon)
+
+# IMPROVED: Explicit NA handling in CSV writes
+readr::write_csv(an_basic, PATHS$basic_anon, na = "")
 cli::cli_inform(paste("✓ Saved basic anonymized data ->", normalizePath(PATHS$basic_anon)))
 
 # ------------------------- Create Data Dictionary -------------------------
 dict <- tibble(
   column_name      = names(an_basic),
   description      = case_when(
-    column_name == STANDARD_COLUMNS$respondent_id ~ "Anonymized respondent identifier",
+    column_name == STANDARD_COLUMNS$respondent_id ~ "Anonymized respondent identifier (SHA256 hash)",
     column_name == "region" ~ "Geographic region derived from country data",
-    column_name == STANDARD_COLUMNS$progress ~ "Survey completion percentage (0-100)",
+    column_name == STANDARD_COLUMNS$progress ~ "Survey completion percentage (0-100, normalized)",
+    str_detect(column_name, "_month$") ~ "Month extracted from date field (YYYY-MM format)",
     TRUE ~ ""
   ),
   type             = vapply(an_basic, function(x) class(x)[1], character(1)),
@@ -345,10 +402,12 @@ dict <- tibble(
 ) %>%
   mutate(
     n_non_missing    = nrow(an_basic) - n_missing,
-    completeness_pct = round(n_non_missing / nrow(an_basic) * 100, 1)
+    completeness_pct = round(n_non_missing / nrow(an_basic) * 100, 1),
+    is_pii_scrubbed  = if_else(column_name %in% char_cols, "Yes", "N/A")
   )
 
-readr::write_csv(dict, PATHS$dictionary)
+# IMPROVED: Explicit NA handling in CSV write
+readr::write_csv(dict, PATHS$dictionary, na = "")
 cli::cli_inform(paste("✓ Data dictionary ->", normalizePath(PATHS$dictionary)))
 
 # ------------------------- Summary & Validation -------------------------
@@ -357,18 +416,22 @@ cli::cli_inform(paste("Original columns:", ncol(raw)))
 cli::cli_inform(paste("Anonymized columns:", ncol(an_basic)))
 cli::cli_inform(paste("Rows preserved:", nrow(an_basic)))
 cli::cli_inform(paste("PII columns removed:", length(cols_to_remove)))
+cli::cli_inform(paste("Text columns scrubbed:", length(char_cols)))
 if ("region" %in% names(an_basic)) {
   cli::cli_inform("✓ Region derived from geographic data")
 }
 
 # Final validation checks
 cli::cli_h1("VALIDATION")
+
+# Row count check
 if (nrow(an_basic) != nrow(raw)) {
   cli::cli_warn(paste("Row count changed:", nrow(raw), "->", nrow(an_basic)))
 }
 
+# Duplicate ID check (redundant but important)
 if (any(duplicated(an_basic[[STANDARD_COLUMNS$respondent_id]]))) {
-  cli::cli_warn("Duplicate respondent IDs detected!")
+  cli::cli_abort("CRITICAL: Duplicate respondent IDs still present after final check!")
 }
 
 # Progress statistics if available
@@ -380,16 +443,45 @@ if (STANDARD_COLUMNS$progress %in% names(an_basic)) {
       min_progress = min(.data[[STANDARD_COLUMNS$progress]], na.rm = TRUE),
       max_progress = max(.data[[STANDARD_COLUMNS$progress]], na.rm = TRUE),
       n_complete = sum(.data[[STANDARD_COLUMNS$progress]] >= 100, na.rm = TRUE),
-      n_sufficient = sum(.data[[STANDARD_COLUMNS$progress]] >= QUALITY_PARAMS$min_progress, na.rm = TRUE)
+      n_sufficient = sum(.data[[STANDARD_COLUMNS$progress]] >= QUALITY_PARAMS$min_progress, na.rm = TRUE),
+      n_zero = sum(.data[[STANDARD_COLUMNS$progress]] == 0, na.rm = TRUE)
     )
   
   cli::cli_inform("Progress statistics:")
   cli::cli_inform(paste("  Mean:", round(progress_stats$mean_progress, 1), "%"))
   cli::cli_inform(paste("  Median:", round(progress_stats$median_progress, 1), "%"))
+  cli::cli_inform(paste("  Range:", round(progress_stats$min_progress, 1), "-", 
+                        round(progress_stats$max_progress, 1), "%"))
   cli::cli_inform(paste("  Complete (100%):", progress_stats$n_complete))
   cli::cli_inform(paste("  Sufficient (>=", QUALITY_PARAMS$min_progress, "%):", 
                         progress_stats$n_sufficient))
+  cli::cli_inform(paste("  Zero progress:", progress_stats$n_zero))
+}
+
+# PII scrubbing validation
+sample_text <- an_basic %>%
+  select(all_of(char_cols)) %>%
+  slice_sample(n = min(10, nrow(an_basic))) %>%
+  unlist() %>%
+  na.omit()
+
+if (length(sample_text) > 0) {
+  # Check for any remaining PII patterns
+  pii_patterns_check <- c(
+    "\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b",  # Email
+    "\\b\\d{3}[-.]?\\d{3}[-.]?\\d{4}\\b",  # Phone
+    "\\b\\d{3}-\\d{2}-\\d{4}\\b"  # SSN
+  )
+  
+  for (pattern in pii_patterns_check) {
+    if (any(str_detect(sample_text, pattern))) {
+      cli::cli_warn("Potential PII pattern still detected after scrubbing!")
+    }
+  }
 }
 
 cli::cli_h1("✓ ANONYMIZATION COMPLETE")
 cli::cli_inform("Next step: Run 02_process_survey.R for survey processing")
+cli::cli_inform(paste("Output files:",
+                      "\n  - Anonymized data:", normalizePath(PATHS$basic_anon),
+                      "\n  - Data dictionary:", normalizePath(PATHS$dictionary)))

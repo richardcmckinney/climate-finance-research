@@ -1,0 +1,107 @@
+# ===========================================
+# LICENSE for Climate Finance Research Pipeline
+# ===========================================
+#
+# PURPOSE OF THIS LICENSE:
+# This MIT License governs the use of the pipeline CODE ONLY, not the data.
+# We chose MIT License for the code because it:
+#
+# 1. PROMOTES REPRODUCIBILITY:
+#    - Allows other researchers to verify our methodology
+#    - Enables replication studies with different datasets
+#    - Facilitates peer review of our analytical approach
+#
+# 2. ENABLES COLLABORATION:
+#    - Permits modifications for different research contexts
+#    - Allows integration into larger research projects
+#    - Encourages improvements and bug fixes
+#
+# 3. MAINTAINS ATTRIBUTION:
+#    - Requires copyright notice to remain intact
+#    - Ensures original work is credited
+#    - Protects academic citation norms
+#
+# 4. PROVIDES LEGAL CLARITY:
+#    - No warranty disclaimer protects against liability
+#    - Clear terms prevent ambiguity about usage rights
+#    - Compatible with academic and commercial use
+#
+# IMPORTANT DISTINCTIONS:
+#
+# - CODE License (THIS FILE): MIT License - very permissive
+# - DATA License: CC BY 4.0 - requires attribution
+# - Raw Data: NOT included (contains PII, ethics-restricted)
+# - Documentation: CC BY 4.0 - share with attribution
+#
+# WHAT THIS MEANS FOR USERS:
+#
+# ✅ YOU CAN:
+#    - Use the pipeline code for any purpose (commercial or academic)
+#    - Modify the code to suit your needs
+#    - Distribute copies of the code
+#    - Include it in proprietary projects
+#    - Use it without asking permission
+#
+# ⚠️ YOU MUST:
+#    - Include this copyright notice in copies
+#    - Include this license text in distributions
+#    - Attribute data usage per CC BY 4.0 requirements
+#
+# ❌ YOU CANNOT:
+#    - Hold the author liable for any damages
+#    - Use the author's name for endorsement
+#    - Claim original authorship of this code
+#    - Remove copyright notices from the code
+#
+# DATA USAGE NOTE:
+# The anonymized datasets (N=1,563 and N=1,307) are released under
+# CC BY 4.0 International License. If you use the data, you must:
+# - Give appropriate credit (cite the paper)
+# - Indicate if changes were made
+# - Link to the CC BY 4.0 license
+# - Not apply legal terms restricting others' use
+#
+# SUGGESTED CITATION:
+# @article{mckinney2025capital,
+#   title={The Capital–Opportunity Mismatch: A Multi-Stakeholder Analysis 
+#          of Climate Finance Barriers and Solutions},
+#   author={McKinney, Richard},
+#   year={2025},
+#   institution={University of Oxford}
+# }
+#
+# ===========================================
+
+MIT License
+
+Copyright (c) 2025 Richard McKinney
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+# ===========================================
+# Additional Legal Notes:
+#
+# 1. This license applies ONLY to the code in this repository
+# 2. Data files have separate licensing (see README.md)
+# 3. No warranty means use at your own risk
+# 4. "Software" refers to all R scripts and pipeline code
+# 5. This is a standard MIT License, widely recognized
+#
+# For questions about licensing: richardmckinney@pm.me
+# ===========================================
