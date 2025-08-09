@@ -12,10 +12,11 @@
 #   data/data_dictionary.csv
 #
 # Flags:
-#   --clean         Remove known outputs before running
-#   --verify        Run verification after pipeline (default TRUE)
-#   --no-install    Do not install missing packages; fail if missing
-#   --quiet         Suppress verbose console logging
+#   --clean           Remove known outputs before running
+#   --verify          Run verification after pipeline (default TRUE)
+#   --no-install      Do not install missing packages; fail if missing
+#   --quiet           Suppress verbose console logging
+#   --with-analysis   Also run analysis stage (1307 subset + 03/04 scripts; creates output/ and figures/)
 
 suppressPackageStartupMessages({
   if (!"methods" %in% loadedNamespaces()) library(methods)
@@ -28,6 +29,17 @@ CLEAN      <- has_flag("--clean")
 VERIFY     <- has_flag("--verify") || !any(grepl("^--(no-)?verify$", args))
 NO_INSTALL <- has_flag("--no-install")
 QUIET      <- has_flag("--quiet")
+WITH_ANALYSIS <- has_flag("--with-analysis")
+
+# add near the top of run_all.R
+options(
+  error = function(e) {
+    dir.create("docs", showWarnings = FALSE, recursive = TRUE)
+    cat("ERROR: ", conditionMessage(e), "\n\n", file = "docs/last_error.txt")
+    cat(paste(capture.output(traceback(30)), collapse = "\n"), file = "docs/last_error.txt", append = TRUE)
+    quit(status = 1)
+  }
+)
 
 # Deterministic session
 set.seed(12345)
@@ -69,6 +81,8 @@ outputs <- list(
 if (!dir.exists(inputs_dir)) stop("Required folder `", inputs_dir, "` not found. Place raw CSVs there.")
 dir.create("data", showWarnings = FALSE, recursive = TRUE)
 dir.create("docs", showWarnings = FALSE, recursive = TRUE)
+dir.create("output", showWarnings = FALSE, recursive = TRUE)
+if (WITH_ANALYSIS) dir.create("figures", showWarnings = FALSE, recursive = TRUE)
 
 # Optional clean
 if (CLEAN) {
@@ -79,19 +93,34 @@ if (CLEAN) {
 }
 
 # Runner
-run_script <- function(path) {
+run_script <- function(path, required = TRUE) {
   cli::cli_alert_info(paste("Running", path, "…"))
-  if (!file.exists(path)) stop("Script not found: ", path)
+  if (!file.exists(path)) {
+    msg <- paste0("Script not found: ", path)
+    if (required) stop(msg) else { cli::cli_alert_warning(msg); return(invisible(FALSE)) }
+  }
   env <- new.env(parent = globalenv())
   sys.source(path, envir = env, keep.source = FALSE)
   cli::cli_alert_success(paste("Completed", path))
+  invisible(TRUE)
 }
 
 # Execute
 for (s in scripts) run_script(s)
 
+if (WITH_ANALYSIS) {
+  # Deterministic analysis subset (required)
+  run_script("R/get_exact_1307.R", required = TRUE)
+  # Optional wrapper (run if present)
+  run_script("R/02_main_analysis.R", required = FALSE)
+  # Main analysis (required)
+  run_script("R/03_main_analysis.R", required = TRUE)
+  # Hypothesis testing / EFA / CFA / regressions (optional until finalized)
+  run_script("R/04_hypothesis_testing.R", required = FALSE)
+}
+
 # Verification
-verify_outputs <- function(outputs) {
+verify_outputs <- function(outputs, extra_files = character(0)) {
   cli::cli_h1("Verification")
 
   # 1) Presence
@@ -134,9 +163,13 @@ verify_outputs <- function(outputs) {
     cli::cli_alert_success("Preliminary dataset has valid categories and consistent row count.")
   }
 
-  # 4) Checksums
-  cs <- vapply(unlist(outputs), function(p) digest::digest(file = p, algo = "sha256"), character(1))
-  checksum_df <- tibble::tibble(file = names(outputs), path = unlist(outputs), sha256 = unname(cs))
+  # 4) Checksums (core + optional analysis artifacts)
+  core_paths  <- unlist(outputs)
+  extra_files <- extra_files[file.exists(extra_files)]
+  all_paths   <- c(core_paths, extra_files)
+  all_labels  <- c(names(outputs), basename(extra_files))
+  cs <- vapply(all_paths, function(p) digest::digest(file = p, algo = "sha256"), character(1))
+  checksum_df <- tibble::tibble(file = all_labels, path = all_paths, sha256 = unname(cs))
   readr::write_csv(checksum_df, "docs/checksums.txt")
   cli::cli_alert_success("Checksums written to docs/checksums.txt")
 
@@ -148,6 +181,7 @@ verify_outputs <- function(outputs) {
     "",
     "## Outputs present",
     paste0("- ", names(outputs), ": ", unname(unlist(outputs))),
+    if (length(extra_files)) c("", "## Analysis artifacts", paste0("- ", basename(extra_files))) else character(0),
     "",
     "## Checksums (sha256)",
     paste0("- ", checksum_df$file, ": ", checksum_df$sha256),
@@ -157,7 +191,15 @@ verify_outputs <- function(outputs) {
   cli::cli_alert_success("Verification report written to docs/verification_report.md")
   invisible(TRUE)
 }
-if (VERIFY) verify_outputs(outputs)
+extra <- character(0)
+if (WITH_ANALYSIS) {
+  extra <- c(
+    "data/climate_finance_survey_final_1307.csv",
+    list.files("output",  recursive = TRUE, full.names = TRUE),
+    list.files("figures", recursive = TRUE, full.names = TRUE)
+  )
+}
+if (VERIFY) verify_outputs(outputs, extra_files = extra)
 
 cat("\n=== SESSION INFO ===\n"); print(sessionInfo())
 cli::cli_alert_success("Pipeline completed successfully.")
