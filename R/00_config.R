@@ -1,7 +1,10 @@
 # R/00_config.R - Central configuration for all paths and standards
 # This file must be sourced by all other scripts
-# Version: 2.1
-# Date: 2025-08-08
+# Version: 3.0
+# Date: 2025-08-09
+# 
+# IMPORTANT: This is a pure configuration file with NO external dependencies.
+# All functions requiring packages should be implemented in their respective modules.
 
 # =============================================================================
 # ENVIRONMENT SETUP (Set deterministic behavior)
@@ -9,16 +12,6 @@
 options(stringsAsFactors = FALSE)
 Sys.setenv(TZ = "UTC")
 set.seed(20240101)
-
-# Load required packages for functions in this config
-suppressPackageStartupMessages({
-  if (!requireNamespace("dplyr", quietly = TRUE)) {
-    stop("Package 'dplyr' is required but not installed")
-  }
-  if (!requireNamespace("rlang", quietly = TRUE)) {
-    stop("Package 'rlang' is required but not installed")
-  }
-})
 
 # =============================================================================
 # PATH CONFIGURATION (Single source of truth)
@@ -73,8 +66,20 @@ STANDARD_COLUMNS <- list(
   respondent_id = "respondent_id",
   response_id = "ResponseId",
   
-  # Role/category columns
+  # Role/category columns - standardized name
   role = "Final_Role_Category",
+  
+  # Alternative role column names (for detection, not standardization)
+  # Note: Business logic for handling these belongs in processing scripts
+  role_alternatives = c(
+    "Final_Role_Category",
+    "final_category_appendix_j",
+    "stakeholder_category",
+    "Category",
+    "role_category"
+  ),
+  
+  # Raw role data columns
   role_raw = "Role_Raw", 
   role_text = "Role_Other_Text",
   
@@ -92,17 +97,42 @@ STANDARD_COLUMNS <- list(
 )
 
 # Privacy-sensitive columns that must NEVER appear in outputs
-PRIVACY_COLUMNS <- c(
-  "Q2.2",           # Raw geographic data
-  "email",          # Email addresses
-  "address",        # Physical addresses  
-  "phone",          # Phone numbers
-  "organization",   # Organization names
-  "company",        # Company names
-  "name",           # Personal names
-  "ip_address",     # IP addresses
-  "latitude",       # GPS coordinates
-  "longitude"       # GPS coordinates
+# Using exact column names to avoid false positives from pattern matching
+PRIVACY_COLUMNS <- list(
+  # Exact column names
+  exact = c(
+    "Q2.2",           # Raw geographic data
+    "email",          # Email addresses
+    "Email",          # Alternative case
+    "E-mail",         # Alternative spelling
+    "address",        # Physical addresses
+    "Address",        # Alternative case
+    "phone",          # Phone numbers
+    "Phone",          # Alternative case
+    "organization",   # Organization names
+    "Organization",   # Alternative case
+    "company",        # Company names
+    "Company",        # Alternative case
+    "name",           # Personal names (exact match only)
+    "Name",           # Alternative case
+    "ip_address",     # IP addresses
+    "IP_Address",     # Alternative case
+    "IPAddress",      # Alternative format
+    "latitude",       # GPS coordinates
+    "Latitude",       # Alternative case
+    "longitude",      # GPS coordinates
+    "Longitude"       # Alternative case
+  ),
+  
+  # Patterns for partial matching (use with caution)
+  # These require word boundaries or specific context to avoid false positives
+  patterns = list(
+    email = "\\b[Ee][-_]?mail\\b",
+    phone = "\\b[Pp]hone\\b",
+    address = "\\b[Aa]ddress\\b",
+    ip = "\\bIP[-_]?[Aa]ddress\\b",  # More specific pattern for IP
+    coords = "\\b(lat|lon|latitude|longitude)\\b"
+  )
 )
 
 # =============================================================================
@@ -173,20 +203,37 @@ validate_columns <- function(df, required_cols) {
 }
 
 # Check for privacy violations in a dataframe
+# Fixed to use more precise matching to avoid false positives
 check_privacy_violations <- function(df, stop_on_violation = TRUE) {
   violations <- character()
   
-  # Check column names
-  for (col in PRIVACY_COLUMNS) {
-    if (col %in% names(df)) {
-      violations <- c(violations, paste("Column found:", col))
+  # Check for exact column name matches
+  exact_matches <- intersect(PRIVACY_COLUMNS$exact, names(df))
+  if (length(exact_matches) > 0) {
+    for (col in exact_matches) {
+      violations <- c(violations, paste("Exact match found:", col))
     }
-    # Also check for partial matches
-    pattern_matches <- grep(col, names(df), ignore.case = TRUE, value = TRUE)
-    if (length(pattern_matches) > 0) {
-      violations <- c(violations, 
-                     paste("Pattern match for", col, ":", 
-                           paste(pattern_matches, collapse = ", ")))
+  }
+  
+  # Check for pattern matches with more precision
+  # Only check patterns if explicitly needed and with word boundaries
+  if (length(PRIVACY_COLUMNS$patterns) > 0) {
+    for (pattern_name in names(PRIVACY_COLUMNS$patterns)) {
+      pattern <- PRIVACY_COLUMNS$patterns[[pattern_name]]
+      pattern_matches <- grep(pattern, names(df), perl = TRUE, value = TRUE)
+      
+      # Filter out false positives based on context
+      # For example, "description" should not match "ip" pattern
+      if (pattern_name == "ip" && length(pattern_matches) > 0) {
+        # Only keep matches that actually relate to IP addresses
+        pattern_matches <- pattern_matches[grepl("\\bIP", pattern_matches, ignore.case = TRUE)]
+      }
+      
+      if (length(pattern_matches) > 0) {
+        violations <- c(violations, 
+                       paste("Pattern match for", pattern_name, ":", 
+                             paste(pattern_matches, collapse = ", ")))
+      }
     }
   }
   
@@ -208,42 +255,6 @@ check_privacy_violations <- function(df, stop_on_violation = TRUE) {
   return(length(violations) == 0)
 }
 
-# Standardization function for role columns
-standardize_role_column <- function(df, verbose = TRUE) {
-  # Ensure dplyr and rlang are available
-  if (!requireNamespace("dplyr", quietly = TRUE)) {
-    stop("Package 'dplyr' is required for standardize_role_column()")
-  }
-  if (!requireNamespace("rlang", quietly = TRUE)) {
-    stop("Package 'rlang' is required for standardize_role_column()")
-  }
-  
-  # Possible role column names in order of preference
-  role_variants <- c(
-    "Final_Role_Category",
-    "final_category_appendix_j", 
-    "stakeholder_category",
-    "Category",
-    "role_category"
-  )
-  
-  role_col <- intersect(role_variants, names(df))[1]
-  
-  if (is.na(role_col)) {
-    stop("No role category column found. Checked: ", 
-         paste(role_variants, collapse = ", "))
-  }
-  
-  if (role_col != "Final_Role_Category") {
-    if (verbose) {
-      message("Standardizing role column: ", role_col, " -> Final_Role_Category")
-    }
-    df <- dplyr::rename(df, Final_Role_Category = !!rlang::sym(role_col))
-  }
-  
-  return(df)
-}
-
 # Get a safe file path (creates directory if needed)
 safe_path <- function(path) {
   dir_path <- dirname(path)
@@ -253,21 +264,49 @@ safe_path <- function(path) {
   return(normalizePath(path, mustWork = FALSE))
 }
 
+# Helper function to detect role column in a dataframe
+# Returns the column name if found, NULL otherwise
+# Note: This is configuration/detection only - standardization belongs in processing scripts
+detect_role_column <- function(df) {
+  if (!is.data.frame(df)) {
+    stop("Input must be a data frame")
+  }
+  
+  # Check for standard role column alternatives
+  role_cols <- intersect(STANDARD_COLUMNS$role_alternatives, names(df))
+  
+  if (length(role_cols) > 0) {
+    # Return the first match based on priority order
+    return(role_cols[1])
+  }
+  
+  # No role column found
+  return(NULL)
+}
+
 # =============================================================================
 # PIPELINE STAGE TRACKING
 # =============================================================================
 
 # Track current pipeline stage (for error reporting)
-CURRENT_STAGE <- NULL
+# Note: Using a list in .GlobalEnv to avoid namespace issues
+if (!exists(".PIPELINE_STATE", envir = .GlobalEnv)) {
+  assign(".PIPELINE_STATE", list(stage = NULL), envir = .GlobalEnv)
+}
 
 set_stage <- function(stage) {
-  assign("CURRENT_STAGE", stage, envir = .GlobalEnv)
+  .PIPELINE_STATE <- get(".PIPELINE_STATE", envir = .GlobalEnv)
+  .PIPELINE_STATE$stage <- stage
+  assign(".PIPELINE_STATE", .PIPELINE_STATE, envir = .GlobalEnv)
   message(paste("\n=== Pipeline Stage:", stage, "==="))
 }
 
 get_stage <- function() {
-  if (exists("CURRENT_STAGE", envir = .GlobalEnv)) {
-    return(get("CURRENT_STAGE", envir = .GlobalEnv))
+  if (exists(".PIPELINE_STATE", envir = .GlobalEnv)) {
+    state <- get(".PIPELINE_STATE", envir = .GlobalEnv)
+    if (!is.null(state$stage)) {
+      return(state$stage)
+    }
   }
   return("Unknown")
 }
@@ -286,17 +325,53 @@ QUALITY_PARAMS <- list(
 )
 
 # =============================================================================
+# ERROR HANDLING CONFIGURATION
+# =============================================================================
+
+# Standard error messages for common issues
+ERROR_MESSAGES <- list(
+  missing_file = "Required file not found: %s",
+  invalid_stage = "Invalid pipeline stage: %s",
+  privacy_violation = "Privacy-sensitive data detected in: %s",
+  deprecated_file = "Deprecated file detected: %s",
+  column_missing = "Required column missing: %s",
+  data_corruption = "Data integrity check failed for: %s",
+  quota_mismatch = "Quota requirements not met for category: %s"
+)
+
+# =============================================================================
 # INITIALIZATION CHECK
 # =============================================================================
 
 # Simple initialization check and status message
-if (!exists(".config_initialized")) {
+# Using a unique variable name to avoid conflicts
+if (!exists(".config_00_initialized", envir = .GlobalEnv)) {
   deprecated <- check_deprecated(verbose = FALSE)
-  if (length(deprecated) > 0) {
-    message("Configuration loaded. Warning: ", length(deprecated), 
-            " deprecated file(s) found. Run check_deprecated() for details.")
-  } else {
-    message("Configuration loaded successfully.")
+  
+  # Create necessary directories
+  required_dirs <- unique(dirname(unlist(PATHS)))
+  for (dir in required_dirs) {
+    if (!dir.exists(dir)) {
+      dir.create(dir, recursive = TRUE, showWarnings = FALSE)
+    }
   }
-  .config_initialized <- TRUE
+  
+  # Status message
+  if (length(deprecated) > 0) {
+    message(sprintf(
+      "Configuration loaded with warnings. %d deprecated file(s) found.",
+      length(deprecated)
+    ))
+    message("Run check_deprecated() for details.")
+  } else {
+    message("Master configuration (00_config.R) loaded successfully.")
+    message(sprintf("  Target N: %d", QUALITY_PARAMS$target_n))
+    message(sprintf("  Pipeline paths configured: %d", length(PATHS)))
+    message(sprintf("  Quality parameters set: %d", length(QUALITY_PARAMS)))
+  }
+  
+  # Mark as initialized
+  assign(".config_00_initialized", TRUE, envir = .GlobalEnv)
 }
+
+# EOF

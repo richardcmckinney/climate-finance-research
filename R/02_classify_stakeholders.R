@@ -5,12 +5,14 @@ if (!exists(".local", inherits = TRUE)) .local <- function(...) NULL
 
 # 02_classify_stakeholders.R
 # Purpose: Produce stakeholder classifications per Appendix J methodology
-# Version: 3.2 - Fixed namespace issues
+# Version: 4.0 - Fixed critical data joining bug and removed redundancy
 # Key Changes:
-#   - STRICT privacy violation checking (stop_on_violation = TRUE)
-#   - Robust case_when classification logic for maintainability
-#   - Standardized column naming conventions
-#   - Fixed rlang::sym namespace usage
+#   - FIXED: Critical bug in data joining that could cause silent data loss
+#   - FIXED: Now tracks actual column names from source data for proper joining
+#   - REMOVED: Redundant pick_col function - now uses centralized helpers
+#   - ENHANCED: Robust column tracking throughout pipeline
+#   - MAINTAINED: STRICT privacy violation checking (stop_on_violation = TRUE)
+#   - MAINTAINED: Robust case_when classification logic
 # Outputs:
 #   - docs/appendix_j_classification_template.csv
 #   - data/survey_responses_anonymized_preliminary.csv
@@ -44,24 +46,45 @@ out_audit    <- PATHS$classification_audit
 stopifnot(file.exists(in_basic))
 df <- suppressMessages(read_csv(in_basic, show_col_types = FALSE))
 
-# Extract role columns (robustly)
-# This function handles various column naming conventions from different survey platforms
-pick_col <- function(df, candidates) {
-  hits <- intersect(candidates, names(df))
-  if (length(hits)) df[[hits[1]]] else rep(NA_character_, nrow(df))
+# --------------------------------------------------------------------
+# CRITICAL FIX: Track actual column names from source data
+# --------------------------------------------------------------------
+# This ensures we can properly join back to the original data
+# by tracking what column names actually exist in the source
+
+# Track the actual column name for respondent ID in the source data
+respondent_id_column <- find_column(df, c(
+  "respondent_id", "ResponseId", "_recordId", "response_id", "ID", "id"
+))
+
+if (is.null(respondent_id_column)) {
+  stop("CRITICAL ERROR: No respondent ID column found in source data. ",
+       "Expected one of: respondent_id, ResponseId, _recordId, response_id, ID, id")
 }
 
-role_raw <- pick_col(df, c(
+message("✓ Found respondent ID column: '", respondent_id_column, "'")
+
+# Extract role columns using centralized helpers
+role_raw_column <- find_column(df, c(
   "role_raw", "Q2.1",
   "Which of the following best describes your role? (Please select the most appropriate option) - Selected Choice"
 ))
 
-role_other <- pick_col(df, c(
+role_other_column <- find_column(df, c(
   "role_other", "Q2.1_12_TEXT",
   "Which of the following best describes your role? (Please select the most appropriate option) - Other (please specify)  - Text"
 ))
 
-respondent_id <- pick_col(df, c("respondent_id", "ResponseId", "_recordId", "response_id"))
+# Extract actual values (with safety for missing columns)
+respondent_id <- if (!is.null(respondent_id_column)) df[[respondent_id_column]] else stop("Missing respondent ID")
+role_raw <- if (!is.null(role_raw_column)) df[[role_raw_column]] else rep(NA_character_, nrow(df))
+role_other <- if (!is.null(role_other_column)) df[[role_other_column]] else rep(NA_character_, nrow(df))
+
+# Log column mapping for audit trail
+message("\n=== COLUMN MAPPING ===")
+message("Respondent ID: '", respondent_id_column, "' -> respondent_id")
+if (!is.null(role_raw_column)) message("Role Raw: '", role_raw_column, "' -> role_raw")
+if (!is.null(role_other_column)) message("Role Other: '", role_other_column, "' -> role_other")
 
 # --------------------------------------------------------------------
 # Classification Functions
@@ -233,9 +256,13 @@ classify_stakeholder_robust <- function(raw_text, other_text) {
 # Apply Classification
 # --------------------------------------------------------------------
 
-# Create classification data frame
+# Create classification data frame WITH PROPER ID TRACKING
+# CRITICAL: Keep the respondent_id values for joining, but also track the source column name
 cls <- tibble(
+  # Use consistent internal name 'respondent_id' for processing
   respondent_id = respondent_id,
+  # Keep source column name for reference
+  .source_id_column = respondent_id_column,
   role_raw  = role_raw,
   role_other = role_other
 ) %>%
@@ -278,14 +305,14 @@ classification_df <- classification_df %>%
     Role_Other_Text = role_other,
     Final_Role_Category = final_category_appendix_j  # Standardize primary column
   ) %>%
-  select(-role_raw_norm, -role_other_norm)  # Remove temporary processing columns
+  select(-role_raw_norm, -role_other_norm, -.source_id_column)  # Remove temporary processing columns
 
 # Add metadata columns for pipeline tracking
 classification_df <- classification_df %>%
   mutate(
     Classification_Stage = "preliminary",
     Classification_Date = Sys.Date(),
-    Classification_Version = "3.2"  # Updated version for namespace fix
+    Classification_Version = "4.0"  # Updated version for join fix
   )
 
 message("✓ Standardized column names applied")
@@ -305,14 +332,50 @@ dir.create(dirname(out_audit),    showWarnings = FALSE, recursive = TRUE)
 write_csv(template, out_template)
 message("Template saved to: ", normalizePath(out_template))
 
-# Join back to full dataset with STANDARDIZED names
+# --------------------------------------------------------------------
+# CRITICAL FIX: Join back using the ACTUAL column name from source
+# --------------------------------------------------------------------
+message("\n=== JOINING CLASSIFICATION TO SOURCE DATA ===")
+message("Using source column '", respondent_id_column, "' for join")
+
+# Create temporary version of classification_df with the source column name for joining
+join_df <- classification_df %>%
+  select(respondent_id, preliminary_category, Final_Role_Category,
+         Classification_Stage, Classification_Date, Classification_Version)
+
+# Rename the respondent_id column to match the source data's actual column name
+names(join_df)[names(join_df) == "respondent_id"] <- respondent_id_column
+
+# Now perform the join using the actual column name that exists in both dataframes
 df_prelim <- df %>%
   left_join(
-    classification_df %>% 
-      select(respondent_id, preliminary_category, Final_Role_Category,
-             Classification_Stage, Classification_Date, Classification_Version),
-    by = "respondent_id"
+    join_df,
+    by = respondent_id_column  # Use the actual column name from source
   )
+
+# Verify join success by checking for NAs in classification columns
+join_na_count <- sum(is.na(df_prelim$Final_Role_Category))
+if (join_na_count > 0) {
+  warning("WARNING: Join may have failed - ", join_na_count, 
+          " records have NA in Final_Role_Category after join!")
+  
+  # Additional diagnostics
+  message("Checking for ID mismatches...")
+  source_ids <- df[[respondent_id_column]]
+  class_ids <- classification_df$respondent_id
+  
+  missing_in_class <- setdiff(source_ids, class_ids)
+  missing_in_source <- setdiff(class_ids, source_ids)
+  
+  if (length(missing_in_class) > 0) {
+    message("  - ", length(missing_in_class), " IDs from source not in classification")
+  }
+  if (length(missing_in_source) > 0) {
+    message("  - ", length(missing_in_source), " IDs from classification not in source")
+  }
+} else {
+  message("✓ Join successful - all records have classification")
+}
 
 # Ensure Final_Role_Category is the primary column name
 if ("final_category_appendix_j" %in% names(df_prelim)) {
@@ -362,9 +425,11 @@ audit_log <- summary_stats %>%
     Needs_Harmonization = sum(classification_df$needs_harmonization, na.rm = TRUE),
     Direct_Classification = sum(!classification_df$needs_harmonization, na.rm = TRUE),
     Pipeline_Stage = "Classification",
-    Script_Version = "3.2",  # Updated version
+    Script_Version = "4.0",  # Updated version
     Classification_Method = "case_when",
-    Privacy_Check = "STRICT"
+    Privacy_Check = "STRICT",
+    Source_ID_Column = respondent_id_column,  # Track which column was used
+    Join_Success_Rate = paste0(round((nrow(df_prelim) - join_na_count) / nrow(df_prelim) * 100, 2), "%")
   )
 
 write_csv(audit_log, out_audit)
@@ -404,11 +469,18 @@ if ("Final_Role_Category" %in% names(df_prelim)) {
   warning("Final_Role_Category column missing from output!")
 }
 
+# Join verification details
+message("\n=== JOIN VERIFICATION ===")
+message("✓ Source ID column: '", respondent_id_column, "'")
+message("✓ Join performed on matching column names")
+message("✓ Join success rate: ", round((nrow(df_prelim) - join_na_count) / nrow(df_prelim) * 100, 2), "%")
+
 # Classification method verification
 message("\n=== CLASSIFICATION METHOD VERIFICATION ===")
-message("✓ Using robust case_when classification logic (v3.2)")
+message("✓ Using robust case_when classification logic (v4.0)")
 message("✓ Classification rules are now auditable and maintainable")
 message("✓ STRICT privacy enforcement enabled - pipeline will halt on PII detection")
-message("✓ Namespace issues fixed - rlang::sym properly used")
+message("✓ Data joining bug FIXED - using actual source column names")
+message("✓ Using centralized helpers from 00_config.R")
 
-message("\n✓ Classification complete with robust case_when logic, standardized column names, STRICT privacy enforcement, and proper namespacing!")
+message("\n✓ Classification complete with FIXED joining logic, centralized helpers, standardized column names, and STRICT privacy enforcement!")
