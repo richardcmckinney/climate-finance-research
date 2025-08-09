@@ -1,69 +1,125 @@
-# R project files
-.Rproj.user
+# R/RStudio files
 .Rhistory
 .RData
+.Rproj.user/
+*.Rproj
 .Ruserdata
 
-# OAuth tokens
-.httr-oauth
-
-# System files
-.DS_Store
-
-# Quarto
-.quarto
-
-# Raw input data
+# Raw data - NEVER commit
 data_raw/
+raw_data/
+*.xlsx
+*.xls
+*_raw.csv
+*_RAW.csv
+raw_*.csv
 
-# Workspace data files
+# Deprecated files - remove if found
+data/climate_finance_survey_classified.csv
+data/climate_finance_survey_anonymized.csv
+
+# Sensitive patterns - NEVER commit
+*Q2.2*
+*Q2_2*
+*email*
+*Email*
+*EMAIL*
+*address*
+*Address*
+*ADDRESS*
+*phone*
+*Phone*
+*PHONE*
+*organization_names*
+*company_names*
+*personal_info*
+*PII*
+*pii*
+
+# Temporary and backup files
+*.tmp
+*.temp
+*.bak
+*.backup
+*~
+.~*
+
+# Log files that might contain sensitive info
+logs/
+*.log
+error_log.txt
+last_error.txt
+last_error_summary.txt
+
+# Checkpoints (may contain sensitive data)
+checkpoints/
 *.RData
+*.rda
 *.rds
 
-# Generated outputs
-data/*.csv
-docs/*.csv
-output/
-
-# Logs
-*.log
-# R project files
-.Rproj.user
-.Rhistory
-.RData
-.Ruserdata
-
-# OAuth tokens
-.httr-oauth
-
-# System files
+# OS files
 .DS_Store
+Thumbs.db
+desktop.ini
 
-# Quarto
-.quarto
+# Output files to review before committing
+output/*.csv
+!output/classification_audit.csv
+!output/hypothesis_testing_summary.csv
+!output/quality_assurance_report.csv
 
-# Raw input data (never commit PII)
-data_raw/
+# Figures with potential geographic data
+figures/*Q2.2*
+figures/*geographic*
+!figures/figure4_geographic_distribution.png  # Only if verified anonymized
 
-# Workspace data files (binary)
-*.RData
-*.rds
+# Documentation drafts
+*.draft
+*.todo
+TODO.md
 
-# Build / derived artifacts
-output/
-*.log
+# Personal notes
+notes/
+personal/
+private/
 
-# ----------------------------
-# Versioned data & docs policy
-# ----------------------------
-# We keep key CSVs under version control for reproducibility.
-# (Do NOT add raw or sensitive sources here.)
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
 
-# Allow-list important CSVs in /data
-!data/survey_responses_anonymized_basic.csv
-!data/survey_responses_anonymized_preliminary.csv
-!data/data_dictionary.csv
+# Python (if mixed environment)
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+env/
+venv/
+
+# Package files
+*.tar.gz
+*.zip
+
+# Credentials (should never exist, but safety)
+*.key
+*.pem
+*credentials*
+*token*
+*secret*
+.env
+.env.*
+
+# Large files
+*.sql
+*.db
+*.sqlite
+
+# Ensure critical files ARE tracked
+!R/00_config.R
+!R/99_quality_checks.R
 !docs/appendix_j_classification_template.csv
-
-# Allow-list classification template in /docs
-!docs/appendix_j_classification_template.csv
+!docs/checksums.txt
+!docs/verification_report.md
+!README.md
+!run_all.R

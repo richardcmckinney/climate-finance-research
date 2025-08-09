@@ -5,25 +5,32 @@ if (!exists(".local", inherits = TRUE)) .local <- function(...) NULL
 
 # 02_classify_stakeholders.R
 # Purpose: Produce stakeholder classifications per Appendix J methodology
+# Version: 2.0 - With standardized column naming
 # Outputs:
 #   - docs/appendix_j_classification_template.csv
 #   - data/survey_responses_anonymized_preliminary.csv
-#   - output/classification_audit.csv (NEW: auditable summary)
+#   - output/classification_audit.csv
 
 suppressPackageStartupMessages({
   library(tidyverse)
   library(stringr)
 })
 
+# Source central configuration
+source("R/00_config.R")
+check_deprecated()  # Warn about old files
+validate_stage("classify")  # Validate prerequisites
+
 message("=== STAKEHOLDER CLASSIFICATION (APPENDIX J) ===")
+set_stage("Classification")
 
 # --------------------------------------------------------------------
-# Config / paths
+# Use paths from central config
 # --------------------------------------------------------------------
-in_basic  <- "data/survey_responses_anonymized_basic.csv"
-out_template <- "docs/appendix_j_classification_template.csv"
-out_prelim   <- "data/survey_responses_anonymized_preliminary.csv"
-out_audit    <- "output/classification_audit.csv"  # NEW: audit log
+in_basic  <- PATHS$basic_anon
+out_template <- PATHS$classification_template
+out_prelim   <- PATHS$preliminary_classified
+out_audit    <- PATHS$classification_audit
 
 # --------------------------------------------------------------------
 # Load data
@@ -264,10 +271,35 @@ classification_df <- cls %>%
   )
 
 # --------------------------------------------------------------------
+# STANDARDIZE COLUMN NAMES (NEW SECTION)
+# --------------------------------------------------------------------
+message("\n=== STANDARDIZING COLUMN NAMES ===")
+
+# Rename columns to standard names BEFORE saving
+classification_df <- classification_df %>%
+  rename(
+    # Use standard names from central config
+    Role_Raw = role_raw,
+    Role_Other_Text = role_other,
+    Final_Role_Category = final_category_appendix_j  # Standardize primary column
+  ) %>%
+  select(-role_raw_norm, -role_other_norm)  # Remove temporary processing columns
+
+# Add metadata columns for pipeline tracking
+classification_df <- classification_df %>%
+  mutate(
+    Classification_Stage = "preliminary",
+    Classification_Date = Sys.Date(),
+    Classification_Version = "2.0"
+  )
+
+message("✓ Standardized column names applied")
+
+# --------------------------------------------------------------------
 # Save outputs
 # --------------------------------------------------------------------
 
-# Template for manual review
+# Template for manual review (use standardized names)
 template <- classification_df %>%
   arrange(desc(needs_harmonization), respondent_id)
 
@@ -278,34 +310,43 @@ dir.create(dirname(out_audit),    showWarnings = FALSE, recursive = TRUE)
 write_csv(template, out_template)
 message("Template saved to: ", normalizePath(out_template))
 
-# Join back to full dataset
+# Join back to full dataset with STANDARDIZED names
 df_prelim <- df %>%
   left_join(
     classification_df %>% 
-      select(respondent_id, preliminary_category, final_category_appendix_j),
+      select(respondent_id, preliminary_category, Final_Role_Category,
+             Classification_Stage, Classification_Date, Classification_Version),
     by = "respondent_id"
   )
+
+# Ensure Final_Role_Category is the primary column name
+if ("final_category_appendix_j" %in% names(df_prelim)) {
+  df_prelim <- df_prelim %>% select(-final_category_appendix_j)
+}
+
+# Check for privacy violations before saving
+check_privacy_violations(df_prelim, stop_on_violation = FALSE)
 
 write_csv(df_prelim, out_prelim)
 message("Preliminary data saved to: ", normalizePath(out_prelim))
 
 # --------------------------------------------------------------------
-# Summary Statistics & AUDIT LOG (NEW)
+# Summary Statistics & AUDIT LOG 
 # --------------------------------------------------------------------
 
 message("\n=== CLASSIFICATION SUMMARY ===")
 
-# Overall distribution
+# Overall distribution (use standardized column name)
 summary_stats <- classification_df %>%
-  count(final_category_appendix_j, sort = TRUE) %>%
+  count(Final_Role_Category, sort = TRUE) %>%
   mutate(percentage = round(n / sum(n) * 100, 1))
 
 print(summary_stats, n = 30)
 
-# Save audit log to file
+# Save audit log to file with additional metadata
 audit_log <- summary_stats %>%
   rename(
-    Category = final_category_appendix_j,
+    Category = Final_Role_Category,
     Count = n,
     Percentage = percentage
   ) %>%
@@ -313,7 +354,9 @@ audit_log <- summary_stats %>%
     Audit_Date = Sys.Date(),
     Total_Records = nrow(classification_df),
     Needs_Harmonization = sum(classification_df$needs_harmonization, na.rm = TRUE),
-    Direct_Classification = sum(!classification_df$needs_harmonization, na.rm = TRUE)
+    Direct_Classification = sum(!classification_df$needs_harmonization, na.rm = TRUE),
+    Pipeline_Stage = "Classification",
+    Script_Version = "2.0"
   )
 
 write_csv(audit_log, out_audit)
@@ -324,10 +367,10 @@ message("Total responses: ", nrow(classification_df))
 message("Needs harmonization: ", sum(classification_df$needs_harmonization, na.rm = TRUE))
 message("Direct classification: ", sum(!classification_df$needs_harmonization, na.rm = TRUE))
 
-# Validation check - ensure no NAs in final category
-na_count <- sum(is.na(classification_df$final_category_appendix_j))
+# Validation check - ensure no NAs in final category (use standardized name)
+na_count <- sum(is.na(classification_df$Final_Role_Category))
 if (na_count > 0) {
-  warning("Found ", na_count, " NA values in final_category_appendix_j!")
+  warning("Found ", na_count, " NA values in Final_Role_Category!")
 } else {
   message("\n✓ All records have valid final categories")
 }
@@ -336,7 +379,7 @@ if (na_count > 0) {
 message("\n=== SAMPLE HARMONIZED ENTRIES ===")
 harmonized_sample <- classification_df %>%
   filter(needs_harmonization) %>%
-  select(role_other, final_category_appendix_j) %>%
+  select(Role_Other_Text, Final_Role_Category) %>%
   slice_sample(n = min(10, sum(classification_df$needs_harmonization, na.rm = TRUE)))
 
 if (nrow(harmonized_sample) > 0) {
@@ -345,4 +388,12 @@ if (nrow(harmonized_sample) > 0) {
   message("No harmonized entries to display")
 }
 
-message("\n✓ Classification complete!")
+# Final column name verification
+message("\n=== COLUMN NAME VERIFICATION ===")
+if ("Final_Role_Category" %in% names(df_prelim)) {
+  message("✓ Final_Role_Category column present in output")
+} else {
+  warning("Final_Role_Category column missing from output!")
+}
+
+message("\n✓ Classification complete with standardized column names!")
