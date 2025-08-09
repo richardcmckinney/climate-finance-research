@@ -1,3 +1,13 @@
+# ---- Config and determinism ----
+if (file.exists("R/00_config.R")) source("R/00_config.R")
+options(stringsAsFactors = FALSE)
+Sys.setenv(TZ = "UTC")
+set.seed(20240101)
+
+# Resolve input/output paths
+.input_path  <- if (exists("PATHS") && !is.null(PATHS$preliminary_classified)) PATHS$preliminary_classified else "data/survey_responses_anonymized_preliminary.csv"
+.output_path <- if (exists("PATHS") && !is.null(PATHS$final_1307)) PATHS$final_1307 else "data/climate_finance_survey_final_1307.csv"
+
 #!/usr/bin/env Rscript
 # Safety for Rscript/S4 compatibility (MUST BE FIRST)
 if (!"methods" %in% loadedNamespaces()) library(methods)

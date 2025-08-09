@@ -55,7 +55,9 @@ run_quality_checks <- function(verbose = TRUE, save_report = TRUE) {
   # Check final dataset
   if (file.exists(PATHS$final_1307)) {
     df_final <- readr::read_csv(PATHS$final_1307, show_col_types = FALSE, n_max = 10)
-    column_check_results$final_role <- "Final_Role_Category" %in% names(df_final)
+    role_ok  <- any(c("Final_Role_Category","final_category_appendix_j") %in% names(df_final))
+    quota_ok <- "quota_target_category" %in% names(df_final)
+    column_check_results$final_role <- role_ok && quota_ok
     column_check_results$final_progress <- "Progress" %in% names(df_final)
   } else {
     column_check_results$final_role <- NA
@@ -65,7 +67,7 @@ run_quality_checks <- function(verbose = TRUE, save_report = TRUE) {
   # Check preliminary classified
   if (file.exists(PATHS$preliminary_classified)) {
     df_prelim <- readr::read_csv(PATHS$preliminary_classified, show_col_types = FALSE, n_max = 10)
-    column_check_results$prelim_role <- "Final_Role_Category" %in% names(df_prelim)
+    column_check_results$prelim_role <- any(c("Final_Role_Category","final_category_appendix_j") %in% names(df_prelim))
   } else {
     column_check_results$prelim_role <- NA
   }
@@ -278,8 +280,13 @@ run_quality_checks <- function(verbose = TRUE, save_report = TRUE) {
     dict_df <- readr::read_csv(PATHS$dictionary, show_col_types = FALSE)
     basic_df <- readr::read_csv(PATHS$basic_anon, show_col_types = FALSE, n_max = 1)
     
-    dict_check$matches <- identical(sort(names(basic_df)), 
-                                   sort(dict_df$column_name))
+    dict_col_field <- if ("column_name" %in% names(dict_df)) "column_name" else if ("column" %in% names(dict_df)) "column" else NA_character_
+    if (is.na(dict_col_field)) {
+      dict_check$matches <- FALSE
+    } else {
+      dict_check$matches <- identical(sort(names(basic_df)), 
+                                      sort(dict_df[[dict_col_field]]))
+    }
   }
   
   results$dictionary <- dict_check$exists && dict_check$matches
@@ -449,3 +456,40 @@ if (!interactive() && length(commandArgs(trailingOnly = TRUE)) == 0) {
     quit(save = "no", status = 1)
   }
 }
+
+# ---- Checksums and verification report ----
+if (file.exists("R/00_config.R")) source("R/00_config.R")
+
+sha_path <- if (exists("PATHS") && !is.null(PATHS$checksums)) PATHS$checksums else "docs/checksums.txt"
+vr_path  <- if (exists("PATHS") && !is.null(PATHS$verification_report)) PATHS$verification_report else "docs/verification_report.md"
+
+artifacts <- c(
+  "data/survey_responses_anonymized_basic.csv",
+  "docs/appendix_j_classification_template.csv",
+  "data/survey_responses_anonymized_preliminary.csv",
+  "data/data_dictionary.csv"
+)
+if (file.exists("data/climate_finance_survey_final_1307.csv")) {
+  artifacts <- c(artifacts, "data/climate_finance_survey_final_1307.csv")
+}
+if (!dir.exists(dirname(sha_path))) dir.create(dirname(sha_path), recursive = TRUE, showWarnings = FALSE)
+
+sha_fun <- function(p) if (file.exists(p)) digest::digest(p, algo = "sha256", file = TRUE) else NA_character_
+hash_df <- tibble::tibble(file = artifacts, sha256 = vapply(artifacts, sha_fun, character(1)))
+readr::write_csv(hash_df, sha_path)
+
+# Simple verification report
+count_fun <- function(p) {
+  if (!file.exists(p)) return(NA_integer_)
+  suppressWarnings(nrow(readr::read_csv(p, show_col_types = FALSE)))
+}
+counts <- vapply(artifacts, count_fun, integer(1))
+report <- paste0(
+  "# Verification Report\n\n",
+  "*Timestamp (UTC):* ", format(Sys.time(), "%Y-%m-%d %H:%M:%S", tz = "UTC"), "\n\n",
+  "## Artifacts\n\n",
+  paste(sprintf("- %s — rows: %s", artifacts, ifelse(is.na(counts), "NA", counts)), collapse = "\n"), "\n\n",
+  "## Session Info\n\n",
+  "```\n", paste(capture.output(sessionInfo()), collapse = "\n"), "\n```\n"
+)
+writeLines(report, vr_path)

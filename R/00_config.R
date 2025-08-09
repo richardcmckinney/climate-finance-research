@@ -299,3 +299,19 @@ if (interactive()) {
   message("\nAccess paths with: PATHS$<name>")
   message("Access standard columns with: STANDARD_COLUMNS$<name>")
 }
+
+# ---- Canonical paths (appended) ----
+if (!exists("PATHS")) PATHS <- list()
+PATHS <- utils::modifyList(PATHS, list(
+  basic_anon = "data/survey_responses_anonymized_basic.csv",
+  preliminary_classified = "data/survey_responses_anonymized_preliminary.csv",
+  appendix_j_template = "docs/appendix_j_classification_template.csv",
+  final_1307 = "data/climate_finance_survey_final_1307.csv",
+  checksums = "docs/checksums.txt",
+  verification_report = "docs/verification_report.md"
+))
+
+# ---- Determinism ----
+options(stringsAsFactors = FALSE)
+Sys.setenv(TZ = "UTC")
+set.seed(20240101)
