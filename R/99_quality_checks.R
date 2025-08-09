@@ -1,7 +1,7 @@
 #!/usr/bin/env Rscript
 # R/99_quality_checks.R - Comprehensive quality assurance checks
 # Purpose: Run comprehensive quality checks on pipeline outputs with enhanced diagnostics
-# Version: 2.0
+# Version: 2.1
 # Author: Pipeline QA System
 # 
 # ENHANCEMENTS:
@@ -11,6 +11,7 @@
 # - Fixed write_csv to include na = "" parameter
 # - Added comprehensive sample size and distribution checks
 # - Improved error handling and reporting throughout
+# - Fixed docstring syntax error (replaced Python-style with R comments)
 
 suppressPackageStartupMessages({
   library(tidyverse)
@@ -29,20 +30,18 @@ source("R/appendix_j_config.R")
 # =============================================================================
 
 report_check <- function(name, status, message_ok, message_fail, details = NULL, verbose = TRUE) {
-  """
-  Enhanced reporting function for consistent diagnostic output
-  
-  Args:
-    name: Name of the check
-    status: Boolean result of the check
-    message_ok: Message to display on success
-    message_fail: Message to display on failure
-    details: Additional details to display (optional)
-    verbose: Whether to print output
-  
-  Returns:
-    List with check results and diagnostic information
-  """
+  # Enhanced reporting function for consistent diagnostic output
+  # 
+  # Args:
+  #   name: Name of the check
+  #   status: Boolean result of the check
+  #   message_ok: Message to display on success
+  #   message_fail: Message to display on failure
+  #   details: Additional details to display (optional)
+  #   verbose: Whether to print output
+  # 
+  # Returns:
+  #   List with check results and diagnostic information
   
   if (verbose) {
     if (status) {

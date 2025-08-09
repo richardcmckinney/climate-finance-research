@@ -3,8 +3,9 @@
 # Purpose: Single source of truth for target distribution quotas with self-contained helpers
 # Author: Richard McKinney
 # Date: 2025-08-09
-# Version: 4.0 - CRITICAL FIXES APPLIED
+# Version: 4.1 - SYNTAX FIXES APPLIED
 # Changes: 
+#   - FIXED: Replaced Python-style docstrings with proper R comments
 #   - FIXED: Miscellaneous category target from 99 to 151 (per documentation)
 #   - FIXED: Adjusted Entrepreneur category from 159 to 107 to maintain N=1,307
 #   - ENHANCED: Robust rlang dependency handling with fallbacks
@@ -14,7 +15,7 @@
 # ========================= DEPENDENCY MANAGEMENT =========================
 # Ensure required packages are available when needed with proper fallbacks
 .ensure_rlang <- function() {
-  """Check if rlang is available and provide appropriate handling"""
+  # Check if rlang is available and provide appropriate handling
   if (!requireNamespace("rlang", quietly = TRUE)) {
     # If rlang is not available, we'll use base R alternatives
     message("Note: Package 'rlang' not found. Using base R alternatives.")
@@ -28,7 +29,7 @@
 
 # Helper for dynamic column selection that works with or without rlang
 .safe_select_column <- function(df, col_name) {
-  """Safely select columns with proper error handling"""
+  # Safely select columns with proper error handling
   if (!is.data.frame(df) && !inherits(df, "tbl_df")) {
     stop("Input must be a data frame or tibble", call. = FALSE)
   }
@@ -45,15 +46,14 @@
 # ========================= TARGET DISTRIBUTION (FIXED) =========================
 # CRITICAL FIX: Corrected Miscellaneous from 99 to 151, adjusted Entrepreneur to maintain N=1,307
 get_appendix_j_target <- function() {
-  """
-  Returns the target distribution for Appendix J categories.
-  CRITICAL: Total MUST equal exactly 1,307 for publication requirements.
+  # Returns the target distribution for Appendix J categories.
+  # CRITICAL: Total MUST equal exactly 1,307 for publication requirements.
+  # 
+  # Fix Applied: 
+  #   - Miscellaneous changed from 99 to 151 (+52)
+  #   - Entrepreneur in Climate Technology changed from 159 to 107 (-52)
+  #   - Net change: 0 (maintains N=1,307)
   
-  Fix Applied: 
-    - Miscellaneous changed from 99 to 151 (+52)
-    - Entrepreneur in Climate Technology changed from 159 to 107 (-52)
-    - Net change: 0 (maintains N=1,307)
-  """
   target <- data.frame(
     Category = c(
       "Entrepreneur in Climate Technology",
@@ -166,13 +166,14 @@ get_appendix_j_target <- function() {
 APPENDIX_J_CONFIG <- list(
   target_n = 1307,
   n_categories = 23,
-  version = "2025-08-09-v4.0-FIXED",  # Version with critical fixes
-  description = "Climate Finance Survey - Appendix J Distribution (CRITICAL FIXES APPLIED)",
+  version = "2025-08-09-v4.1-SYNTAX-FIXED",  # Version with syntax fixes
+  description = "Climate Finance Survey - Appendix J Distribution (SYNTAX & CRITICAL FIXES APPLIED)",
   
   # Document the fix for audit trail
   fix_notes = list(
     date = "2025-08-09",
     fixes_applied = c(
+      "Replaced Python docstrings with R comments for proper syntax",
       "Miscellaneous category: 99 -> 151 (+52)",
       "Entrepreneur in Climate Technology: 159 -> 107 (-52)",
       "Net change: 0 (maintains N=1,307)",
@@ -230,22 +231,21 @@ APPENDIX_J_CONFIG <- list(
 # These are the ONLY versions of these functions - no duplicates elsewhere
 
 find_column_by_priority <- function(df, candidates, pattern = NULL, verbose = FALSE) {
-  """
-  Find a column in a dataframe by priority order.
-  This is the CENTRAL function that all other column finders should use.
+  # Find a column in a dataframe by priority order.
+  # This is the CENTRAL function that all other column finders should use.
+  # 
+  # Args:
+  #   df: Data frame to search
+  #   candidates: Vector of column names in priority order
+  #   pattern: Optional regex pattern for fallback search
+  #   verbose: Whether to print diagnostic messages
+  # 
+  # Returns:
+  #   String: Name of the found column
+  # 
+  # Raises:
+  #   Error if no matching column is found
   
-  Args:
-    df: Data frame to search
-    candidates: Vector of column names in priority order
-    pattern: Optional regex pattern for fallback search
-    verbose: Whether to print diagnostic messages
-  
-  Returns:
-    String: Name of the found column
-  
-  Raises:
-    Error if no matching column is found
-  """
   # Ensure rlang is available if we need it for symbol creation
   if (.RLANG_AVAILABLE && exists("sym", where = "package:rlang", mode = "function")) {
     # We have rlang available, but we'll use base R for this function
@@ -292,10 +292,9 @@ find_column_by_priority <- function(df, candidates, pattern = NULL, verbose = FA
 
 # Specialized role column finder that delegates to central function
 find_role_column <- function(df, verbose = FALSE) {
-  """
-  Find the role/category column in a dataframe.
-  Delegates to find_column_by_priority with role-specific configuration.
-  """
+  # Find the role/category column in a dataframe.
+  # Delegates to find_column_by_priority with role-specific configuration.
+  
   tryCatch({
     find_column_by_priority(
       df = df,
@@ -313,11 +312,10 @@ find_role_column <- function(df, verbose = FALSE) {
 
 # Specialized progress column finder that delegates to central function
 find_progress_column <- function(df, verbose = FALSE) {
-  """
-  Find the progress column in a dataframe.
-  Delegates to find_column_by_priority with progress-specific configuration.
-  Returns NULL if not found (optional column).
-  """
+  # Find the progress column in a dataframe.
+  # Delegates to find_column_by_priority with progress-specific configuration.
+  # Returns NULL if not found (optional column).
+  
   tryCatch({
     col_name <- find_column_by_priority(
       df = df,
@@ -353,18 +351,17 @@ find_progress_column <- function(df, verbose = FALSE) {
 
 validate_categories <- function(data_categories, target = get_appendix_j_target(), 
                               verbose = FALSE, suggest_mappings = FALSE) {
-  """
-  Validate that data categories match the target distribution.
+  # Validate that data categories match the target distribution.
+  # 
+  # Args:
+  #   data_categories: Vector of categories from the data
+  #   target: Target distribution (default: get_appendix_j_target())
+  #   verbose: Print detailed validation report
+  #   suggest_mappings: Suggest mappings for mismatched categories
+  # 
+  # Returns:
+  #   List with validation results and statistics
   
-  Args:
-    data_categories: Vector of categories from the data
-    target: Target distribution (default: get_appendix_j_target())
-    verbose: Print detailed validation report
-    suggest_mappings: Suggest mappings for mismatched categories
-  
-  Returns:
-    List with validation results and statistics
-  """
   target_cats <- target$Category
   
   # Clean data categories
@@ -412,7 +409,7 @@ validate_categories <- function(data_categories, target = get_appendix_j_target(
 # ========================= INTERNAL HELPER FUNCTIONS =========================
 
 .suggest_category_mappings <- function(extra_cats, missing_cats) {
-  """Suggest mappings between mismatched categories using string similarity"""
+  # Suggest mappings between mismatched categories using string similarity
   suggestions <- list()
   
   for (extra in extra_cats) {
@@ -439,7 +436,7 @@ validate_categories <- function(data_categories, target = get_appendix_j_target(
 }
 
 .string_similarity <- function(str1, str2) {
-  """Calculate simple string similarity based on word overlap"""
+  # Calculate simple string similarity based on word overlap
   words1 <- strsplit(str1, "\\s+")[[1]]
   words2 <- strsplit(str2, "\\s+")[[1]]
   matches <- length(intersect(words1, words2))
@@ -450,7 +447,7 @@ validate_categories <- function(data_categories, target = get_appendix_j_target(
 }
 
 .print_validation_report <- function(result) {
-  """Print a formatted validation report"""
+  # Print a formatted validation report
   cat("\n=== Category Validation Report ===\n")
   cat(sprintf("Target categories: %d\n", result$n_target))
   cat(sprintf("Data categories: %d\n", result$n_data))
@@ -490,16 +487,15 @@ validate_categories <- function(data_categories, target = get_appendix_j_target(
 # ========================= SUMMARY AND UTILITY FUNCTIONS =========================
 
 get_target_summary <- function(target = get_appendix_j_target(), format = "list") {
-  """
-  Get summary statistics for the target distribution.
+  # Get summary statistics for the target distribution.
+  # 
+  # Args:
+  #   target: Target distribution
+  #   format: 'list' or 'data.frame'
+  # 
+  # Returns:
+  #   Summary statistics in requested format
   
-  Args:
-    target: Target distribution
-    format: 'list' or 'data.frame'
-  
-  Returns:
-    Summary statistics in requested format
-  """
   summary_stats <- list(
     total_n = sum(target$Target),
     n_categories = nrow(target),
@@ -528,12 +524,11 @@ get_target_summary <- function(target = get_appendix_j_target(), format = "list"
 
 # Function for creating quota matching specifications for tidyverse workflows
 create_quota_matching_spec <- function(target = get_appendix_j_target()) {
-  """
-  Create a quota matching specification for use with tidyverse pipelines.
+  # Create a quota matching specification for use with tidyverse pipelines.
+  # 
+  # Returns:
+  #   quota_matching_spec object with helper methods
   
-  Returns:
-    quota_matching_spec object with helper methods
-  """
   spec <- list(
     target = target,
     target_n = sum(target$Target),
@@ -584,7 +579,7 @@ print.quota_matching_spec <- function(x, ...) {
 
 # ========================= ENVIRONMENT CHECK =========================
 .check_environment <- function() {
-  """Check which optional packages are available"""
+  # Check which optional packages are available
   checks <- list(
     base_r = TRUE,
     rlang = requireNamespace("rlang", quietly = TRUE),
@@ -600,7 +595,7 @@ print.quota_matching_spec <- function(x, ...) {
 # ========================= VALIDATION ON LOAD =========================
 # Run critical validation immediately when sourced
 .validate_on_load <- function() {
-  """Run critical validations when the config is loaded"""
+  # Run critical validations when the config is loaded
   tryCatch({
     target <- get_appendix_j_target()
     
@@ -627,13 +622,14 @@ print.quota_matching_spec <- function(x, ...) {
 # ========================= STATUS MESSAGE =========================
 if (interactive() && !exists(".appendix_j_config_silent")) {
   cat("================================================================================\n")
-  cat("Appendix J Configuration Loaded Successfully (v4.0 - CRITICAL FIXES APPLIED)\n")
+  cat("Appendix J Configuration Loaded Successfully (v4.1 - SYNTAX & CRITICAL FIXES)\n")
   cat("================================================================================\n")
   cat("  Target N:       ", APPENDIX_J_CONFIG$target_n, " ✓ VERIFIED\n")
   cat("  Categories:     ", APPENDIX_J_CONFIG$n_categories, " ✓ VERIFIED\n")
   cat("  Version:        ", APPENDIX_J_CONFIG$version, "\n")
   cat("--------------------------------------------------------------------------------\n")
   cat("CRITICAL FIXES APPLIED:\n")
+  cat("  ✓ Python docstrings replaced with R comments\n")
   cat("  ✓ Miscellaneous: 99 → 151 (+52)\n")
   cat("  ✓ Entrepreneur:  159 → 107 (-52)\n")
   cat("  ✓ Total remains: 1,307\n")
