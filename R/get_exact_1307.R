@@ -1,13 +1,3 @@
-# ---- Config and determinism ----
-if (file.exists("R/00_config.R")) source("R/00_config.R")
-options(stringsAsFactors = FALSE)
-Sys.setenv(TZ = "UTC")
-set.seed(20240101)
-
-# Resolve input/output paths
-.input_path  <- if (exists("PATHS") && !is.null(PATHS$preliminary_classified)) PATHS$preliminary_classified else "data/survey_responses_anonymized_preliminary.csv"
-.output_path <- if (exists("PATHS") && !is.null(PATHS$final_1307)) PATHS$final_1307 else "data/climate_finance_survey_final_1307.csv"
-
 #!/usr/bin/env Rscript
 # Safety for Rscript/S4 compatibility (MUST BE FIRST)
 if (!"methods" %in% loadedNamespaces()) library(methods)
@@ -17,7 +7,7 @@ if (!exists(".local", inherits = TRUE)) .local <- function(...) NULL
 # Purpose: Generate exactly N=1,307 responses matching Appendix J distribution
 # Author: Richard McKinney
 # Date: 2025-08-08
-# Version: 2.0 (with S4 compatibility and optimizations)
+# Version: 3.0 (with centralized configuration)
 
 # ========================= INITIALIZATION =========================
 suppressPackageStartupMessages({
@@ -36,27 +26,51 @@ for (dir in c("data", "output", "logs")) {
   dir.create(dir, recursive = TRUE, showWarnings = FALSE)
 }
 
-# ========================= CONFIGURATION =========================
+# ========================= LOAD CENTRALIZED CONFIGURATION =========================
+# Source centralized Appendix J configuration
+config_paths <- c(
+  "R/appendix_j_config.R",
+  "appendix_j_config.R",
+  "../R/appendix_j_config.R",
+  "scripts/appendix_j_config.R"
+)
+
+config_loaded <- FALSE
+for (config_path in config_paths) {
+  if (file.exists(config_path)) {
+    .appendix_j_config_silent <- TRUE  # Suppress loading message
+    source(config_path)
+    config_loaded <- TRUE
+    break
+  }
+}
+
+if (!config_loaded) {
+  stop("Could not find appendix_j_config.R in any of the expected locations:\n  ",
+       paste(config_paths, collapse = "\n  "),
+       "\nPlease ensure the configuration file is in the correct location.")
+}
+
+# Get target distribution and config from centralized source
+target <- get_appendix_j_target()
+
+# Merge with local configuration
 config <- list(
   # Input/Output paths
   infile         = "data/climate_finance_survey_classified.csv",
-  alt_infile     = "data/survey_responses_anonymized_preliminary.csv",  # Alternative input
+  alt_infile     = "data/survey_responses_anonymized_preliminary.csv",
   outfile_final  = "data/climate_finance_survey_final_1307.csv",
   outfile_verify = "output/final_distribution_verification.csv",
   outfile_log    = "output/reassignment_log.csv",
   outfile_stats  = "output/quota_matching_statistics.csv",
   outfile_quality = "output/quality_control_report.csv",
   
-  # Processing parameters
-  min_progress = 10,
-  target_n = 1307,
+  # Import from centralized config
+  min_progress = APPENDIX_J_CONFIG$min_progress,
+  target_n = APPENDIX_J_CONFIG$target_n,
+  quality_exclusions = APPENDIX_J_CONFIG$quality_exclusions,
   
-  # Quality control exclusions (documented)
-  quality_exclusions = c(
-    "R_bBAyiwWo1sotqM6"  # Straight-line respondent
-  ),
-  
-  # Verbose logging
+  # Local processing parameters
   verbose = TRUE,
   log_file = paste0("logs/get_exact_1307_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".log")
 )
@@ -95,9 +109,10 @@ if (config$verbose) {
   log_msg <- function(...) invisible(NULL)
 }
 
-log_msg("Starting get_exact_1307.R (v2.0)")
+log_msg("Starting get_exact_1307.R (v3.0 - with centralized config)")
 log_msg("R version: ", R.version.string)
 log_msg("Configuration:")
+log_msg("  Appendix J version: ", APPENDIX_J_CONFIG$version)
 log_msg("  Target N: ", config$target_n)
 log_msg("  Min Progress: ", config$min_progress)
 log_msg("  Random seed: 1307")
@@ -183,25 +198,19 @@ if (any(duplicated(df$ResponseId))) {
   df$ResponseId <- make.unique(df$ResponseId, sep = "_")
 }
 
-# Enhanced Progress column detection
-if (!"Progress" %in% names(df)) {
-  progress_candidates <- c("progress", "Progress_pct", "completion", "Completion", 
-                          "PercentComplete", "percent_complete", "pct_complete")
-  progress_col <- intersect(progress_candidates, names(df))
-  
-  if (length(progress_col) > 0) {
-    log_msg("Using alternative progress column: ", progress_col[1])
-    df$Progress <- df[[progress_col[1]]]
-  } else {
-    # Try to infer from column patterns
-    prog_pattern <- grep("prog|compl|pct|percent", names(df), ignore.case = TRUE, value = TRUE)
-    if (length(prog_pattern) > 0) {
-      log_msg("Inferring progress from column: ", prog_pattern[1])
-      df$Progress <- df[[prog_pattern[1]]]
-    } else {
-      stop("Progress column missing and no alternatives found. Available columns:\n  ",
-           paste(names(df), collapse = ", "))
-    }
+# Use centralized helper for Progress column detection
+progress_col <- find_progress_column(df)
+
+if (!is.null(progress_col)) {
+  if (progress_col != "Progress") {
+    log_msg("Using alternative progress column: ", progress_col)
+    df$Progress <- df[[progress_col]]
+  }
+} else {
+  # If no progress column found, check if Progress exists
+  if (!"Progress" %in% names(df)) {
+    stop("Progress column missing and no alternatives found. Available columns:\n  ",
+         paste(names(df), collapse = ", "))
   }
 }
 
@@ -322,35 +331,9 @@ log_msg("\nFiltered from ", initial_count, " to ", nrow(df), " eligible response
 log_msg("Reduction: ", round((1 - nrow(df)/initial_count) * 100, 1), "%")
 log_msg("Retention: ", round((nrow(df)/initial_count) * 100, 1), "%")
 
-# ========================= TARGET DISTRIBUTION =========================
+# ========================= TARGET DISTRIBUTION VALIDATION =========================
 log_msg("\n=== TARGET DISTRIBUTION (APPENDIX J) ===")
-
-target <- tibble::tribble(
-  ~Category, ~Target,
-  "Entrepreneur in Climate Technology", 159,
-  "Venture Capital Firm",               117,
-  "Investment and Financial Services",  109,
-  "Private Equity Firm",                 88,
-  "Business Consulting and Advisory",    79,
-  "Nonprofit Organization",              73,
-  "High Net-Worth Individual",           66,
-  "Government Funding Agency",           53,
-  "Academic or Research Institution",    52,
-  "Limited Partner",                     49,
-  "Family Office",                       48,
-  "Corporate Venture Arm",               47,
-  "Angel Investor",                      43,
-  "ESG Investor",                        38,
-  "Legal Services",                      38,
-  "Corporate Entities",                  35,
-  "Manufacturing and Industrial",        25,
-  "Energy and Infrastructure",           24,
-  "Real Estate and Property",            20,
-  "Philanthropic Organization",          19,
-  "Technology and Software",             19,
-  "Media and Communication",              7,
-  "Miscellaneous and Individual Respondents", 151
-)
+log_msg("Using centralized configuration version: ", APPENDIX_J_CONFIG$version)
 
 # Validate target sum
 target_sum <- sum(target$Target)
@@ -369,51 +352,28 @@ log_msg("Target total: ", target_sum)
 # ========================= ROLE COLUMN DETECTION =========================
 log_msg("\n=== ROLE COLUMN DETECTION ===")
 
-# Try multiple possible column names (expanded list)
-role_candidates <- c("Final_Role_Category", "final_category_appendix_j", 
-                     "stakeholder_category", "Final_Category", "Category",
-                     "Role_Category", "role_category", "StakeholderType")
-role_col <- intersect(role_candidates, names(df))
-
-if (length(role_col) == 0) {
-  # Try pattern matching
-  role_pattern <- grep("role|category|stakeholder", names(df), 
-                      ignore.case = TRUE, value = TRUE)
-  if (length(role_pattern) > 0) {
-    role_col <- role_pattern[1]
-    log_msg("Inferred role column from pattern: ", role_col)
-  } else {
-    stop("No role category column found. Looked for: ", 
-         paste(role_candidates, collapse = ", "),
-         "\nAvailable columns: ", paste(names(df), collapse = ", "))
-  }
-} else {
-  role_col <- role_col[1]
-}
-
+# Use centralized helper function
+role_col <- find_role_column(df)
 log_msg("Using role column: ", role_col)
 
-# Validate categories
-unique_cats <- unique(df[[role_col]])
-unique_cats <- unique_cats[!is.na(unique_cats) & unique_cats != ""]
-log_msg("Unique categories in data: ", length(unique_cats))
+# Validate categories using centralized function
+validation <- validate_categories(df[[role_col]], target)
+log_msg("Unique categories in data: ", length(unique(df[[role_col]])))
+log_msg("Category match rate: ", round(validation$match_rate * 100, 1), "%")
 
-# Category validation
-missing_cats <- setdiff(target$Category, unique_cats)
-if (length(missing_cats) > 0) {
-  log_msg("WARNING: ", length(missing_cats), " target categories not found in data:")
-  for (cat in head(missing_cats, 5)) {  # Show first 5
+if (length(validation$missing) > 0) {
+  log_msg("WARNING: ", length(validation$missing), " target categories not found in data:")
+  for (cat in head(validation$missing, 5)) {
     log_msg("  - ", cat)
   }
-  if (length(missing_cats) > 5) {
-    log_msg("  ... and ", length(missing_cats) - 5, " more")
+  if (length(validation$missing) > 5) {
+    log_msg("  ... and ", length(validation$missing) - 5, " more")
   }
 }
 
-extra_cats <- setdiff(unique_cats, target$Category)
-if (length(extra_cats) > 0) {
-  log_msg("Categories in data but not in target: ", length(extra_cats))
-  for (cat in head(extra_cats, 5)) {
+if (length(validation$extra) > 0) {
+  log_msg("Categories in data but not in target: ", length(validation$extra))
+  for (cat in head(validation$extra, 5)) {
     log_msg("  - ", cat)
   }
 }
@@ -778,6 +738,7 @@ for (i in seq_len(min(5, nrow(completeness_by_cat)))) {
 
 # ========================= FINAL SUMMARY =========================
 log_msg("\n=== PROCESS SUMMARY ===")
+log_msg("Configuration: Appendix J v", APPENDIX_J_CONFIG$version)
 log_msg("Initial responses: ", initial_count)
 log_msg("After filtering: ", nrow(df))
 log_msg("Final dataset: ", nrow(final))
@@ -802,5 +763,6 @@ invisible(list(
   verification = verify_tbl,
   reassignments = reassign_log,
   statistics = first_pass_stats,
-  config = config
+  config = config,
+  appendix_j_config = APPENDIX_J_CONFIG
 ))

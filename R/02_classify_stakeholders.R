@@ -5,7 +5,11 @@ if (!exists(".local", inherits = TRUE)) .local <- function(...) NULL
 
 # 02_classify_stakeholders.R
 # Purpose: Produce stakeholder classifications per Appendix J methodology
-# Version: 3.0 - With robust case_when classification logic
+# Version: 3.1 - With robust case_when classification logic and STRICT privacy enforcement
+# Key Changes:
+#   - STRICT privacy violation checking (stop_on_violation = TRUE)
+#   - Robust case_when classification logic for maintainability
+#   - Standardized column naming conventions
 # Outputs:
 #   - docs/appendix_j_classification_template.csv
 #   - data/survey_responses_anonymized_preliminary.csv
@@ -39,6 +43,7 @@ stopifnot(file.exists(in_basic))
 df <- suppressMessages(read_csv(in_basic, show_col_types = FALSE))
 
 # Extract role columns (robustly)
+# This function handles various column naming conventions from different survey platforms
 pick_col <- function(df, candidates) {
   hits <- intersect(candidates, names(df))
   if (length(hits)) df[[hits[1]]] else rep(NA_character_, nrow(df))
@@ -61,6 +66,7 @@ respondent_id <- pick_col(df, c("respondent_id", "ResponseId", "_recordId", "res
 # --------------------------------------------------------------------
 
 # Normalize text for matching
+# Standardizes text for consistent pattern matching
 normalize_text <- function(x) {
   x %>%
     str_replace_all("\\s+", " ") %>%
@@ -71,18 +77,22 @@ normalize_text <- function(x) {
 }
 
 # Helper function to check if text contains climate-related terms
+# Used to distinguish climate tech entrepreneurs from general entrepreneurs
 is_climate_related <- function(text) {
   climate_terms <- "climate|clean|green|sustain|carbon|emission|renewable|solar|wind|battery|storage|hydrogen|bio|ccus|adapt|energy|electric|environmental|esg"
   str_detect(text, climate_terms)
 }
 
 # Helper function to check if text contains entrepreneur-related terms
+# Identifies various forms of entrepreneurial roles
 is_entrepreneur_related <- function(text) {
   entrepreneur_terms <- "entrepreneur|founder|co[- ]?founder|ceo|cto|startup|venture\\s*builder|launching|started"
   str_detect(text, entrepreneur_terms)
 }
 
 # ROBUST classification using case_when for clarity and maintainability
+# Priority order is preserved through the sequence of conditions
+# Each condition is mutually exclusive due to case_when's first-match behavior
 classify_stakeholder_robust <- function(raw_text, other_text) {
   # Combine both texts for analysis
   combined <- paste(
@@ -273,7 +283,7 @@ classification_df <- classification_df %>%
   mutate(
     Classification_Stage = "preliminary",
     Classification_Date = Sys.Date(),
-    Classification_Version = "3.0"  # Updated version for robust implementation
+    Classification_Version = "3.1"  # Updated version for strict privacy enforcement
   )
 
 message("✓ Standardized column names applied")
@@ -307,9 +317,20 @@ if ("final_category_appendix_j" %in% names(df_prelim)) {
   df_prelim <- df_prelim %>% select(-final_category_appendix_j)
 }
 
-# Check for privacy violations before saving
-check_privacy_violations(df_prelim, stop_on_violation = FALSE)
+# --------------------------------------------------------------------
+# CRITICAL FIX: STRICT PRIVACY VIOLATION CHECK
+# --------------------------------------------------------------------
+# Check for privacy violations before saving - STRICT enforcement
+# This will STOP execution if any PII is detected, preventing data leakage
+message("\n=== STRICT PRIVACY CHECK ===")
+message("Checking for PII violations with STRICT enforcement...")
 
+# CRITICAL: stop_on_violation = TRUE ensures pipeline halts if PII detected
+check_privacy_violations(df_prelim, stop_on_violation = TRUE)
+
+message("✓ Privacy check PASSED - No PII detected")
+
+# Only save if privacy check passes (execution will have stopped if violations found)
 write_csv(df_prelim, out_prelim)
 message("Preliminary data saved to: ", normalizePath(out_prelim))
 
@@ -339,8 +360,9 @@ audit_log <- summary_stats %>%
     Needs_Harmonization = sum(classification_df$needs_harmonization, na.rm = TRUE),
     Direct_Classification = sum(!classification_df$needs_harmonization, na.rm = TRUE),
     Pipeline_Stage = "Classification",
-    Script_Version = "3.0",  # Updated version
-    Classification_Method = "case_when"  # Document the improved method
+    Script_Version = "3.1",  # Updated version for strict privacy enforcement
+    Classification_Method = "case_when",  # Document the improved method
+    Privacy_Check = "STRICT"  # Document strict privacy enforcement
   )
 
 write_csv(audit_log, out_audit)
@@ -382,7 +404,8 @@ if ("Final_Role_Category" %in% names(df_prelim)) {
 
 # Classification method verification
 message("\n=== CLASSIFICATION METHOD VERIFICATION ===")
-message("✓ Using robust case_when classification logic (v3.0)")
+message("✓ Using robust case_when classification logic (v3.1)")
 message("✓ Classification rules are now auditable and maintainable")
+message("✓ STRICT privacy enforcement enabled - pipeline will halt on PII detection")
 
-message("\n✓ Classification complete with robust case_when logic and standardized column names!")
+message("\n✓ Classification complete with robust case_when logic, standardized column names, and STRICT privacy enforcement!")

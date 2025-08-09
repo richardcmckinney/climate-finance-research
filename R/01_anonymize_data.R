@@ -4,7 +4,7 @@ if (!"methods" %in% loadedNamespaces()) library(methods)
 if (!exists(".local", inherits = TRUE)) .local <- function(...) NULL
 
 # 01_anonymize_data.R — Pure anonymization with data cleaning
-# Version 2.0 - Now uses central configuration
+# Version 2.1 - Optimized date parsing and strict privacy enforcement
 # - Drops telemetry/PII columns by name pattern
 # - Cleans core metadata columns (Progress, dates)
 # - Scrubs residual PII from free‑text fields
@@ -59,39 +59,27 @@ find_col <- function(df, candidates = character(0), pattern = NULL) {
   NA_character_
 }
 
+# FIXED: Simplified date parsing using lubridate directly
 safe_month <- function(x) {
   if (is.null(x) || length(x) == 0) return(character(0))
   x <- as.character(x)
   
-  date_formats <- c(
-    "%Y-%m-%d %H:%M:%S",
-    "%Y-%m-%d %H:%M",
-    "%m/%d/%Y %H:%M:%S",
-    "%m/%d/%Y %H:%M",
-    "%d/%m/%Y %H:%M:%S",
-    "%d/%m/%Y %H:%M",
-    "%Y-%m-%d",
-    "%m/%d/%Y",
-    "%d/%m/%Y",
-    "%Y/%m/%d"
-  )
+  # Use lubridate's flexible parser with common date formats
+  # This single call handles all the formats we were manually testing
+  parsed <- suppressWarnings(lubridate::parse_date_time(
+    x,
+    orders = c(
+      "ymd HMS", "ymd HM", "ymd",      # ISO formats
+      "mdy HMS", "mdy HM", "mdy",      # US formats
+      "dmy HMS", "dmy HM", "dmy",      # European formats
+      "ydm HMS", "ydm HM", "ydm"       # Less common but possible
+    ),
+    tz = "UTC",
+    quiet = TRUE,
+    truncated = 3  # Allow truncated formats (e.g., just year-month)
+  ))
   
-  parsed <- as.POSIXct(NA)
-  for (fmt in date_formats) {
-    attempt <- suppressWarnings(as.POSIXct(x, format = fmt, tz = "UTC"))
-    parsed[!is.na(attempt)] <- attempt[!is.na(attempt)]
-  }
-  
-  if (anyNA(parsed)) {
-    na_idx <- which(is.na(parsed))
-    parsed[na_idx] <- suppressWarnings(lubridate::parse_date_time(
-      x[na_idx],
-      orders = c("ymd HMS", "ymd HM", "mdy HMS", "mdy HM", 
-                 "dmy HMS", "dmy HM", "ymd", "mdy", "dmy"),
-      tz = "UTC", quiet = TRUE
-    ))
-  }
-  
+  # Format as year-month
   out <- format(parsed, "%Y-%m")
   out[is.na(parsed)] <- NA_character_
   out
@@ -260,8 +248,8 @@ if (length(char_cols) > 0) {
     mutate(across(all_of(char_cols), scrub_text))
 }
 
-# Check for privacy violations before saving
-check_privacy_violations(an_basic, stop_on_violation = FALSE)
+# FIXED: Strict privacy check - stop on violation to prevent PII leakage
+check_privacy_violations(an_basic, stop_on_violation = TRUE)
 
 # Save basic anonymized file
 cli::cli_inform("Saving basic anonymized data...")

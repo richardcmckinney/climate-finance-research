@@ -1,8 +1,13 @@
 #!/usr/bin/env Rscript
 # R/99_quality_checks.R - Comprehensive quality assurance checks
 # Purpose: Run comprehensive quality checks on pipeline outputs
-# Version: 1.0
+# Version: 1.1
 # Author: Pipeline QA System
+# 
+# FIXES APPLIED:
+# - Removed disconnected code block that was running on every source
+# - Fixed column name checks to remove undefined 'quota_target_category'
+# - All verification logic now properly encapsulated in functions
 
 suppressPackageStartupMessages({
   library(tidyverse)
@@ -52,22 +57,22 @@ run_quality_checks <- function(verbose = TRUE, save_report = TRUE) {
   
   column_check_results <- list()
   
-  # Check final dataset
+  # Check final dataset for standard role column
   if (file.exists(PATHS$final_1307)) {
     df_final <- readr::read_csv(PATHS$final_1307, show_col_types = FALSE, n_max = 10)
-    role_ok  <- any(c("Final_Role_Category","final_category_appendix_j") %in% names(df_final))
-    quota_ok <- "quota_target_category" %in% names(df_final)
-    column_check_results$final_role <- role_ok && quota_ok
+    # Check for standard role columns (removed undefined quota_target_category)
+    role_ok  <- any(c("Final_Role_Category", "final_category_appendix_j") %in% names(df_final))
+    column_check_results$final_role <- role_ok
     column_check_results$final_progress <- "Progress" %in% names(df_final)
   } else {
     column_check_results$final_role <- NA
     column_check_results$final_progress <- NA
   }
   
-  # Check preliminary classified
+  # Check preliminary classified for standard role column
   if (file.exists(PATHS$preliminary_classified)) {
     df_prelim <- readr::read_csv(PATHS$preliminary_classified, show_col_types = FALSE, n_max = 10)
-    column_check_results$prelim_role <- any(c("Final_Role_Category","final_category_appendix_j") %in% names(df_prelim))
+    column_check_results$prelim_role <- any(c("Final_Role_Category", "final_category_appendix_j") %in% names(df_prelim))
   } else {
     column_check_results$prelim_role <- NA
   }
@@ -417,7 +422,7 @@ check_file_for_pii <- function(filepath) {
   return(violations)
 }
 
-# Verify quota matching
+# Verify quota matching (if verification file exists)
 verify_quota_match <- function() {
   if (!file.exists(PATHS$verification)) {
     stop("Verification file not found. Run get_exact_1307.R first.")
@@ -440,6 +445,87 @@ verify_quota_match <- function() {
   ))
 }
 
+# Generate checksums for reproducibility
+generate_checksums <- function(save_to_file = TRUE) {
+  # Define artifacts to checksum
+  artifacts <- c(
+    PATHS$basic_anon,
+    PATHS$classification_template,
+    PATHS$preliminary_classified,
+    PATHS$dictionary
+  )
+  
+  # Add final dataset if it exists
+  if (file.exists(PATHS$final_1307)) {
+    artifacts <- c(artifacts, PATHS$final_1307)
+  }
+  
+  # Calculate checksums
+  sha_fun <- function(p) {
+    if (file.exists(p)) {
+      digest::digest(p, algo = "sha256", file = TRUE)
+    } else {
+      NA_character_
+    }
+  }
+  
+  hash_df <- tibble::tibble(
+    file = artifacts,
+    sha256 = vapply(artifacts, sha_fun, character(1))
+  )
+  
+  # Save if requested
+  if (save_to_file) {
+    sha_path <- safe_path(PATHS$checksums)
+    readr::write_csv(hash_df, sha_path)
+    message("✓ Checksums saved to: ", sha_path)
+  }
+  
+  return(hash_df)
+}
+
+# Generate verification report
+generate_verification_report <- function(save_to_file = TRUE) {
+  # Count rows in each artifact
+  count_fun <- function(p) {
+    if (!file.exists(p)) return(NA_integer_)
+    suppressWarnings(nrow(readr::read_csv(p, show_col_types = FALSE)))
+  }
+  
+  artifacts <- c(
+    PATHS$basic_anon,
+    PATHS$classification_template,
+    PATHS$preliminary_classified,
+    PATHS$dictionary
+  )
+  
+  if (file.exists(PATHS$final_1307)) {
+    artifacts <- c(artifacts, PATHS$final_1307)
+  }
+  
+  counts <- vapply(artifacts, count_fun, integer(1))
+  
+  # Create report content
+  report <- paste0(
+    "# Verification Report\n\n",
+    "*Timestamp (UTC):* ", format(Sys.time(), "%Y-%m-%d %H:%M:%S", tz = "UTC"), "\n\n",
+    "## Artifacts\n\n",
+    paste(sprintf("- %s — rows: %s", basename(artifacts), 
+                  ifelse(is.na(counts), "NA", counts)), collapse = "\n"), "\n\n",
+    "## Session Info\n\n",
+    "```\n", paste(capture.output(sessionInfo()), collapse = "\n"), "\n```\n"
+  )
+  
+  # Save if requested
+  if (save_to_file) {
+    vr_path <- safe_path(PATHS$verification_report)
+    writeLines(report, vr_path)
+    message("✓ Verification report saved to: ", vr_path)
+  }
+  
+  return(report)
+}
+
 # =============================================================================
 # RUN IF CALLED DIRECTLY
 # =============================================================================
@@ -449,6 +535,10 @@ if (!interactive() && length(commandArgs(trailingOnly = TRUE)) == 0) {
   message("Running comprehensive quality checks...")
   results <- run_quality_checks(verbose = TRUE, save_report = TRUE)
   
+  # Also generate checksums and verification report when run directly
+  generate_checksums(save_to_file = TRUE)
+  generate_verification_report(save_to_file = TRUE)
+  
   # Exit with appropriate code
   if (results$overall_status == "PASSED") {
     quit(save = "no", status = 0)
@@ -456,40 +546,3 @@ if (!interactive() && length(commandArgs(trailingOnly = TRUE)) == 0) {
     quit(save = "no", status = 1)
   }
 }
-
-# ---- Checksums and verification report ----
-if (file.exists("R/00_config.R")) source("R/00_config.R")
-
-sha_path <- if (exists("PATHS") && !is.null(PATHS$checksums)) PATHS$checksums else "docs/checksums.txt"
-vr_path  <- if (exists("PATHS") && !is.null(PATHS$verification_report)) PATHS$verification_report else "docs/verification_report.md"
-
-artifacts <- c(
-  "data/survey_responses_anonymized_basic.csv",
-  "docs/appendix_j_classification_template.csv",
-  "data/survey_responses_anonymized_preliminary.csv",
-  "data/data_dictionary.csv"
-)
-if (file.exists("data/climate_finance_survey_final_1307.csv")) {
-  artifacts <- c(artifacts, "data/climate_finance_survey_final_1307.csv")
-}
-if (!dir.exists(dirname(sha_path))) dir.create(dirname(sha_path), recursive = TRUE, showWarnings = FALSE)
-
-sha_fun <- function(p) if (file.exists(p)) digest::digest(p, algo = "sha256", file = TRUE) else NA_character_
-hash_df <- tibble::tibble(file = artifacts, sha256 = vapply(artifacts, sha_fun, character(1)))
-readr::write_csv(hash_df, sha_path)
-
-# Simple verification report
-count_fun <- function(p) {
-  if (!file.exists(p)) return(NA_integer_)
-  suppressWarnings(nrow(readr::read_csv(p, show_col_types = FALSE)))
-}
-counts <- vapply(artifacts, count_fun, integer(1))
-report <- paste0(
-  "# Verification Report\n\n",
-  "*Timestamp (UTC):* ", format(Sys.time(), "%Y-%m-%d %H:%M:%S", tz = "UTC"), "\n\n",
-  "## Artifacts\n\n",
-  paste(sprintf("- %s — rows: %s", artifacts, ifelse(is.na(counts), "NA", counts)), collapse = "\n"), "\n\n",
-  "## Session Info\n\n",
-  "```\n", paste(capture.output(sessionInfo()), collapse = "\n"), "\n```\n"
-)
-writeLines(report, vr_path)

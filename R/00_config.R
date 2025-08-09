@@ -1,10 +1,17 @@
 # R/00_config.R - Central configuration for all paths and standards
 # This file must be sourced by all other scripts
-# Version: 2.0
+# Version: 2.1
 # Date: 2025-08-08
 
 # =============================================================================
-# PATH CONFIGURATION
+# ENVIRONMENT SETUP (Set deterministic behavior)
+# =============================================================================
+options(stringsAsFactors = FALSE)
+Sys.setenv(TZ = "UTC")
+set.seed(20240101)
+
+# =============================================================================
+# PATH CONFIGURATION (Single source of truth)
 # =============================================================================
 
 # Define canonical paths for all pipeline stages
@@ -15,6 +22,7 @@ PATHS <- list(
   
   # Stage 2: Classification outputs  
   classification_template = "docs/appendix_j_classification_template.csv",
+  appendix_j_template = "docs/appendix_j_classification_template.csv",  # Alias for compatibility
   preliminary_classified = "data/survey_responses_anonymized_preliminary.csv",
   classification_audit = "output/classification_audit.csv",
   
@@ -260,58 +268,17 @@ QUALITY_PARAMS <- list(
 )
 
 # =============================================================================
-# INITIALIZE ON LOAD
+# INITIALIZATION CHECK
 # =============================================================================
 
-# Check for deprecated files on load
-.onLoad <- function() {
-  deprecated <- check_deprecated(verbose = FALSE)
-  if (length(deprecated) > 0) {
-    message("Note: ", length(deprecated), " deprecated file(s) found. Run check_deprecated() for details.")
-  }
-}
-
-# Run initialization if being sourced
-if (interactive() || !exists(".config_initialized")) {
+# Simple initialization check and status message
+if (!exists(".config_initialized")) {
   deprecated <- check_deprecated(verbose = FALSE)
   if (length(deprecated) > 0) {
     message("Configuration loaded. Warning: ", length(deprecated), 
-            " deprecated file(s) found.")
+            " deprecated file(s) found. Run check_deprecated() for details.")
   } else {
-    message("Configuration loaded successfully. No deprecated files found.")
+    message("Configuration loaded successfully.")
   }
   .config_initialized <- TRUE
 }
-
-# =============================================================================
-# EXPORT MESSAGE
-# =============================================================================
-
-# List available functions for user reference
-if (interactive()) {
-  message("\nAvailable configuration functions:")
-  message("  - check_deprecated(): Check for deprecated files")
-  message("  - validate_stage(stage): Validate required files for a pipeline stage")
-  message("  - validate_columns(df, cols): Check required columns exist")
-  message("  - check_privacy_violations(df): Check for PII in dataframe")
-  message("  - standardize_role_column(df): Standardize role column names")
-  message("  - safe_path(path): Get safe file path with directory creation")
-  message("\nAccess paths with: PATHS$<name>")
-  message("Access standard columns with: STANDARD_COLUMNS$<name>")
-}
-
-# ---- Canonical paths (appended) ----
-if (!exists("PATHS")) PATHS <- list()
-PATHS <- utils::modifyList(PATHS, list(
-  basic_anon = "data/survey_responses_anonymized_basic.csv",
-  preliminary_classified = "data/survey_responses_anonymized_preliminary.csv",
-  appendix_j_template = "docs/appendix_j_classification_template.csv",
-  final_1307 = "data/climate_finance_survey_final_1307.csv",
-  checksums = "docs/checksums.txt",
-  verification_report = "docs/verification_report.md"
-))
-
-# ---- Determinism ----
-options(stringsAsFactors = FALSE)
-Sys.setenv(TZ = "UTC")
-set.seed(20240101)

@@ -32,9 +32,18 @@ suppressPackageStartupMessages({
 })
 
 # ---- Configuration ------------------------------------------------------------
+# Source configuration if available, otherwise use defaults
+if (file.exists("R/00_config.R")) {
+  source("R/00_config.R")
+  INPUT_FINAL <- PATHS$final_1307
+} else {
+  # Fallback for standalone execution
+  INPUT_FINAL <- "data/climate_finance_survey_final_1307.csv"
+  warning("Configuration file not found, using default path: ", INPUT_FINAL)
+}
+
 VERBOSE <- TRUE            # rich console logging for reviewers
 SAVE_DIAGNOSTICS <- TRUE   # write extra CSVs used in the paper's methods/appendix
-INPUT_FINAL <- "data/climate_finance_survey_final_1307.csv"
 
 # ---- Helpers -----------------------------------------------------------------
 inf <- function(...) if (VERBOSE) cat(paste0(...), "\n")
@@ -102,16 +111,30 @@ df <- df %>%
 # ============================================================================
 # FIGURE 4: Geographic Distribution of Survey Respondents
 # ============================================================================
-# CRITICAL FIX: Use anonymized geographic columns (hq_country/region) instead of raw Q2.2
+# CRITICAL: Privacy-preserving geographic data handling
 
-# Priority order: ONLY anonymized columns allowed
-geo_candidates <- c("hq_country", "region", "geography", "country", "location")
-geo_col <- intersect(geo_candidates, names(df))[1]
+# Step 1: Check what geographic columns are available
+all_geo_cols <- grep("country|region|location|geo|Q2\\.2|hq_", names(df), 
+                     value = TRUE, ignore.case = TRUE)
+inf("Geographic columns present in dataset: ",
+    if(length(all_geo_cols) > 0) paste(all_geo_cols, collapse = ", ") else "NONE")
 
-# CRITICAL: Fail if no anonymized geographic data exists
+# Step 2: Define acceptable anonymized columns (in priority order)
+anonymized_candidates <- c("hq_country", "region", "geography", "country", "location")
+
+# Step 3: Check if Q2.2 (raw data) exists
+has_raw_q22 <- "Q2.2" %in% names(df)
+
+# Step 4: Find the best available geographic column
+# CRITICAL: Exclude Q2.2 from candidates to enforce anonymized data usage
+safe_geo_cols <- setdiff(all_geo_cols, "Q2.2")
+geo_col <- intersect(anonymized_candidates, safe_geo_cols)[1]
+
+# Step 5: Handle different scenarios
 if (is.na(geo_col)) {
-  # Check if raw Q2.2 exists (for diagnostic purposes only)
-  if ("Q2.2" %in% names(df)) {
+  # No anonymized geographic data available
+  if (has_raw_q22) {
+    # Raw data exists but no anonymized version - CRITICAL ERROR
     stop(paste(
       "\n=== CRITICAL ERROR: Geographic Data Privacy Protection ===",
       "\nRaw geographic data (Q2.2) detected but anonymized columns missing.",
@@ -122,42 +145,43 @@ if (is.na(geo_col)) {
       "\n2. Ensure geographic data is properly anonymized to regions",
       "\n3. Verify anonymized columns exist: hq_country, region, or geography",
       "\n",
+      "\nAvailable columns:", paste(names(df)[grep("Q2\\.2|country|region", names(df))], collapse = ", "),
+      "\n",
       "\nDO NOT proceed with analysis using raw Q2.2 data.",
       "\n=========================================================",
       sep = "\n"
     ))
   } else {
-    stop(paste(
-      "\n=== ERROR: No Geographic Data Available ===",
+    # No geographic data at all
+    warning(paste(
+      "\n=== WARNING: No Geographic Data Available ===",
       "\nNo geographic columns found for analysis.",
-      "\nExpected one of: ", paste(geo_candidates, collapse = ", "),
-      "\n",
-      "\nFigure 4 cannot be generated without geographic data.",
+      "\nExpected one of: ", paste(anonymized_candidates, collapse = ", "),
+      "\nFigure 4 will be skipped.",
       sep = "\n"
     ))
+    geo_col <- NA
+  }
+} else {
+  # Successfully found anonymized geographic data
+  inf("✓ Using anonymized geographic column: ", geo_col)
+  inf("✓ Privacy requirements maintained per README.md")
+  
+  # Additional check: warn if raw Q2.2 also exists (shouldn't happen in production)
+  if (has_raw_q22) {
+    inf("⚠ Note: Raw Q2.2 data exists in dataset but is being ignored in favor of anonymized column.")
   }
 }
 
-# Log successful use of anonymized data
-inf("✓ Using anonymized geographic column: ", geo_col)
-inf("✓ Privacy requirements maintained per README.md")
-
+# Step 6: Proceed with geographic analysis only if safe column exists
 if (!is.na(geo_col)) {
-  inf("Geographic columns present:\n  ",
-      paste(grep("country|region|location|geo|Q2\\.2|hq_", names(df), value = TRUE, ignore.case = TRUE),
-            collapse = ", "))
-  inf("Using column: ", geo_col, 
-      if (geo_col == "Q2.2") " (WARNING: Not anonymized!)" else " (Anonymized)")
-
   geo_data <- df %>%
     filter(!is.na(.data[[geo_col]]) & .data[[geo_col]] != "") %>%
     count(.data[[geo_col]], name = "n", sort = TRUE) %>%
     rename(Region = 1) %>%
     mutate(percentage = n / sum(n) * 100)
 
-  inf("\nGeographic distribution (", 
-      if (geo_col == "Q2.2") "RAW - NOT ANONYMIZED" else "anonymized regions", 
-      "):")
+  inf("\nGeographic distribution (anonymized regions):")
   inf(capture.output(utils::head(geo_data, 10)) %>% paste(collapse = "\n"))
 
   fig4 <- ggplot(geo_data, aes(x = "", y = percentage, fill = Region)) +
@@ -167,14 +191,12 @@ if (!is.na(geo_col)) {
     theme(legend.position = "right") +
     scale_fill_manual(values = rep(climate_colors, length.out = nrow(geo_data)), name = "Region") +
     labs(title = "Figure 4: Geographic Distribution of Survey Respondents",
-         subtitle = paste0("N = ", sum(geo_data$n), 
-                          if (geo_col == "Q2.2") " (WARNING: Raw Data)" else " (Anonymized Regions)"))
+         subtitle = paste0("N = ", sum(geo_data$n), " (Anonymized Regions)"))
 
   save_plot("figures/figure4_geographic_distribution.png", fig4, width = 10, height = 6)
   if (SAVE_DIAGNOSTICS) save_csv(geo_data, "output/figure4_geographic_distribution.csv")
 } else {
-  inf("! No geographic column found — skipping Figure 4")
-  inf("  Looked for: ", paste(geo_candidates, collapse = ", "), " and Q2.2")
+  inf("! No geographic analysis performed - geographic data unavailable or not properly anonymized")
 }
 
 # ============================================================================
@@ -431,9 +453,6 @@ if ("Q3.3" %in% names(df)) inf("With Q3.3 (financial/impact): ", sum(!is.na(df$Q
 if (!is.na(geo_col)) {
   inf("With geographic data (", geo_col, "): ", 
       sum(!is.na(df[[geo_col]]) & df[[geo_col]] != ""))
-  if (geo_col == "Q2.2") {
-    inf("  ⚠ WARNING: Using raw geographic data - should be anonymized!")
-  }
 }
 
 # Write a geographic summary table
@@ -516,10 +535,7 @@ if (SAVE_DIAGNOSTICS) save_csv(missingness, "output/missingness_analysis.csv")
 # FINAL SUMMARY
 # ============================================================================
 cat("\n✓ Main analysis finished. See 'figures/' and 'output/' for artifacts.\n")
-if (!is.na(geo_col) && geo_col == "Q2.2") {
-  cat("  ⚠ WARNING: Analysis used raw Q2.2 geographic data.\n")
-  cat("            Per README.md, this should be anonymized to regions for privacy.\n")
-} else if (!is.na(geo_col)) {
+if (!is.na(geo_col)) {
   cat("  ✓ Using anonymized geographic data (", geo_col, ") per privacy requirements.\n")
 }
 cat("\nKey outputs:\n")
