@@ -101,9 +101,7 @@ run_script <- function(path) {
     stop("Required script not found: ", path)
   }
   # Source the script in the global environment.
-  # The `local = TRUE` argument would create a new environment, but for this
-  # simple, linear pipeline, sourcing to the global environment is clean
-  # and straightforward, assuming scripts are self-contained.
+  # This is the simplest and most straightforward approach for a linear pipeline
   source(path, echo = FALSE)
   cli::cli_alert_success(paste("Completed:", path))
 }
@@ -174,8 +172,8 @@ verify_outputs <- function(artifact_paths, is_analysis_run) {
   # 2. Schema check: dictionary vs. basic anonymized data
   cli::cli_h2("2. Schema Validation")
   if (file.exists(paths$basic_anon) && file.exists(paths$dictionary)) {
-    basic_df <- readr::read_csv(paths$basic_anon)
-    dict_df <- readr::read_csv(paths$dictionary)
+    basic_df <- readr::read_csv(paths$basic_anon, show_col_types = FALSE)
+    dict_df <- readr::read_csv(paths$dictionary, show_col_types = FALSE)
     if (identical(names(basic_df), dict_df$column_name)) {
       cli::cli_alert_success("Dictionary schema matches anonymized data.")
     } else {
@@ -187,14 +185,25 @@ verify_outputs <- function(artifact_paths, is_analysis_run) {
   # 3. Check for NAs in final classification
   cli::cli_h2("3. Data Integrity")
   if (file.exists(paths$prelim_classified)) {
-    prelim_df <- readr::read_csv(paths$prelim_classified)
-    if ("final_category_appendix_j" %in% names(prelim_df)) {
-      if (any(is.na(prelim_df$final_category_appendix_j))) {
-        cli::cli_alert_danger("Found NA values in the final classification column.")
+    prelim_df <- readr::read_csv(paths$prelim_classified, show_col_types = FALSE)
+    # Check for either possible column name
+    class_col <- if ("final_category_appendix_j" %in% names(prelim_df)) {
+      "final_category_appendix_j"
+    } else if ("stakeholder_category" %in% names(prelim_df)) {
+      "stakeholder_category"
+    } else {
+      NA_character_
+    }
+    
+    if (!is.na(class_col)) {
+      if (any(is.na(prelim_df[[class_col]]))) {
+        cli::cli_alert_danger(paste("Found NA values in the", class_col, "column."))
         all_ok <- FALSE
       } else {
-        cli::cli_alert_success("No NA values found in classification column.")
+        cli::cli_alert_success(paste("No NA values found in", class_col, "column."))
       }
+    } else {
+      cli::cli_alert_warning("Classification column not found in preliminary data.")
     }
   }
 
@@ -204,7 +213,7 @@ verify_outputs <- function(artifact_paths, is_analysis_run) {
   for (path in artifacts_to_check) {
     if (file.exists(path)) {
       sha <- digest::digest(file = path, algo = "sha256")
-      checksum_df <- checksum_df %>% add_row(file = basename(path), sha256 = sha)
+      checksum_df <- checksum_df %>% dplyr::add_row(file = basename(path), sha256 = sha)
       cli::cli_text(paste0("{.file ", basename(path), "}: ", sha))
     }
   }

@@ -3,11 +3,13 @@
 if (!"methods" %in% loadedNamespaces()) library(methods)
 if (!exists(".local", inherits = TRUE)) .local <- function(...) NULL
 
-# 01_anonymize_data.R — Robust anonymization + Appendix J prep
+# 01_anonymize_data.R — Pure anonymization with data cleaning
 # - Drops telemetry/PII columns by name pattern
-# - Scrubs residual PII from free‑text fields (emails/phones/URLs/@handles)
+# - Cleans core metadata columns (Progress, dates)
+# - Scrubs residual PII from free‑text fields
 # - Preserves `respondent_id` exactly (for stable joins)
-# - Writes: basic anonymized CSV, classification template, preliminary CSV, dictionary
+# - Writes: basic anonymized CSV and data dictionary
+# - NO CLASSIFICATION LOGIC (moved to 02_classify_stakeholders.R)
 
 suppressPackageStartupMessages({
   if (!"methods" %in% loadedNamespaces()) library(methods)
@@ -40,11 +42,10 @@ config <- list(
   ),
   output_paths = list(
     basic       = "data/survey_responses_anonymized_basic.csv",
-    template    = "docs/appendix_j_classification_template.csv",
-    preliminary = "data/survey_responses_anonymized_preliminary.csv",
     dictionary  = "data/data_dictionary.csv"
   ),
-  hash_length = 10
+  hash_length = 10,
+  min_progress = 10  # For data cleaning
 )
 
 # ------------------------- Helpers -------------------------
@@ -119,11 +120,8 @@ scrub_text <- function(x) {
   x <- gsub("(?i)[A-Za-z0-9._%+\\-]+@[A-Za-z0-9.\\-]+\\.[A-Za-z]{2,}", "[REDACTED_EMAIL]", x, perl = TRUE)
   
   # Phone numbers - multiple formats
-  # International format
   x <- gsub("\\+?[1-9]\\d{0,3}[\\s\\-\\.]?\\(?\\d{1,4}\\)?[\\s\\-\\.]?\\d{1,4}[\\s\\-\\.]?\\d{1,9}", "[REDACTED_PHONE]", x, perl = TRUE)
-  # US format (xxx) xxx-xxxx
   x <- gsub("\\(?\\d{3}\\)?[\\s\\-\\.]?\\d{3}[\\s\\-\\.]?\\d{4}", "[REDACTED_PHONE]", x, perl = TRUE)
-  # Generic phone pattern
   x <- gsub("\\b\\d{3,4}[\\s\\-\\.]\\d{3,4}[\\s\\-\\.]\\d{3,4}\\b", "[REDACTED_PHONE]", x, perl = TRUE)
   
   # URLs - comprehensive pattern
@@ -132,42 +130,16 @@ scrub_text <- function(x) {
   # Social media handles
   x <- gsub("@[A-Za-z0-9_]{1,30}\\b", "[REDACTED_HANDLE]", x, perl = TRUE)
   
-  # Credit card numbers (basic pattern)
+  # Credit card numbers
   x <- gsub("\\b\\d{4}[\\s\\-]?\\d{4}[\\s\\-]?\\d{4}[\\s\\-]?\\d{4}\\b", "[REDACTED_CARD]", x, perl = TRUE)
   
-  # SSN pattern (xxx-xx-xxxx)
+  # SSN pattern
   x <- gsub("\\b\\d{3}-\\d{2}-\\d{4}\\b", "[REDACTED_SSN]", x, perl = TRUE)
   
   x
 }
 
-map_prelim_role <- function(role, other_text) {
-  patterns <- list(
-    "Entrepreneur in Climate Technology" = "entrepreneur|founder|startup|cto|ceo",
-    "Venture Capital Firm"               = "(?<!corporate\\s)venture\\s*capital",
-    "Private Equity Firm"                = "private\\s*equity",
-    "Corporate Venture Arm"              = "corporate\\s*venture",
-    "Angel Investor"                     = "\\bangel\\b",
-    "Limited Partner"                    = "limited\\s*partner|\\blp\\b",
-    "Family Office"                      = "family\\s*office",
-    "High Net-Worth Individual"          = "high\\s*net|hnwi",
-    "Government Funding Agency"          = "government|dfi|development\\s*finance|multilateral|bilateral|agency",
-    "Philanthropic Organization"         = "philanthrop|foundation|grantmaker",
-    "Academic or Research Institution"   = "academic|research|university|institution",
-    "Nonprofit Organization"             = "non[- ]?profit|ngo|civil\\s*society|association|institute",
-    "Miscellaneous and Individual Respondents" = "consultant|individual|freelance|other"
-  )
-  z <- tolower(paste(coalesce(role, ""), coalesce(other_text, "")))
-  vapply(z, function(txt) {
-    for (cat in names(patterns)) {
-      if (grepl(patterns[[cat]], txt, perl = TRUE)) return(cat)
-    }
-    "Other"
-  }, character(1), USE.NAMES = FALSE)
-}
-
 # ------------------------- Validate Environment -------------------------
-# Check for required directories
 if (!dir.exists("data_raw")) {
   cli::cli_abort("Directory 'data_raw' not found. Please ensure raw data directory exists.")
 }
@@ -178,7 +150,7 @@ for (path in config$output_paths) {
 }
 
 # ------------------------- Load data -------------------------
-cli::cli_h1("PART 1: BASIC ANONYMIZATION")
+cli::cli_h1("ANONYMIZATION AND DATA CLEANING")
 raw_files <- list.files("data_raw", pattern = "\\.csv$", full.names = TRUE)
 
 if (length(raw_files) == 0) {
@@ -210,12 +182,9 @@ col_end    <- find_col(raw, c("EndDate", "endDate", "End Date", "end_date"),
                       pattern = "^end[_ ]?date$")
 col_record <- find_col(raw, c("RecordedDate", "recordedDate", "Recorded Date", "recorded_date"), 
                       pattern = "^recorded[_ ]?date$")
-
-# role fields (for template)
-col_role        <- find_col(raw, c("Q2.1", "QID174", "role"), 
-                           pattern = "best describes your role|\\bQ2\\.1\\b|QID174")
-col_role_other  <- find_col(raw, c("Q2.1_12_TEXT", "QID174_12_TEXT", "role_other"), 
-                           pattern = "other.*text|Q2\\.1.*TEXT|QID174_.*TEXT")
+col_progress <- find_col(raw, c("Progress", "progress", "Progress_pct", "completion", "Completion", 
+                               "PercentComplete", "percent_complete", "pct_complete"),
+                        pattern = "prog|compl|pct|percent")
 
 # Build anonymized basic
 resp_id <- if (!is.na(col_response_id)) {
@@ -225,10 +194,7 @@ resp_id <- if (!is.na(col_response_id)) {
   seq_len(nrow(raw))
 }
 
-# Compile PII regex pattern
-pii_regex <- paste(config$pii_patterns, collapse = "|")
-
-# Create anonymized dataset
+# Create anonymized dataset with initial transforms
 an_basic <- raw %>%
   mutate(
     respondent_id = hash_id(resp_id, "RESP"),
@@ -236,6 +202,38 @@ an_basic <- raw %>%
            .fns = ~ safe_month(.x), 
            .names = "{.col}_month")
   )
+
+# Clean Progress column if present
+if (!is.na(col_progress)) {
+  cli::cli_inform(paste("Cleaning Progress column:", col_progress))
+  
+  # Convert to numeric
+  an_basic[[col_progress]] <- suppressWarnings(as.numeric(an_basic[[col_progress]]))
+  
+  # Handle percentage values (if Progress is 0-1, convert to 0-100)
+  if (!all(is.na(an_basic[[col_progress]])) && 
+      max(an_basic[[col_progress]], na.rm = TRUE) <= 1) {
+    cli::cli_inform("Converting Progress from decimal (0-1) to percentage (0-100)")
+    an_basic[[col_progress]] <- an_basic[[col_progress]] * 100
+  }
+  
+  # Replace NA with 0
+  n_na_progress <- sum(is.na(an_basic[[col_progress]]))
+  if (n_na_progress > 0) {
+    cli::cli_inform(paste("Replacing", n_na_progress, "NA Progress values with 0"))
+    an_basic[[col_progress]][is.na(an_basic[[col_progress]])] <- 0
+  }
+  
+  # Ensure Progress column is included and cleaned
+  if (!"Progress" %in% names(an_basic) && col_progress != "Progress") {
+    an_basic$Progress <- an_basic[[col_progress]]
+  }
+} else {
+  cli::cli_warn("Progress column not found - downstream scripts may need adjustment")
+}
+
+# Compile PII regex pattern
+pii_regex <- paste(config$pii_patterns, collapse = "|")
 
 # Remove PII columns
 cols_to_remove <- grep(pii_regex, names(an_basic), ignore.case = TRUE, value = TRUE)
@@ -264,40 +262,6 @@ if (length(char_cols) > 0) {
 cli::cli_inform("Saving basic anonymized data...")
 readr::write_csv(an_basic, config$output_paths$basic)
 cli::cli_inform(paste("✓ Saved basic anonymized data ->", normalizePath(config$output_paths$basic)))
-
-# ------------------------- Appendix J preparation -------------------------
-cli::cli_h1("PART 2: PREPARING FOR APPENDIX J CLASSIFICATIONS")
-
-if (!is.na(col_role)) {
-  role_df <- tibble(
-    respondent_id = an_basic$respondent_id,
-    role_raw      = if (!is.na(col_role)) raw[[col_role]] else NA_character_,
-    role_other    = if (!is.na(col_role_other)) raw[[col_role_other]] else NA_character_
-  )
-
-  template <- role_df %>%
-    mutate(
-      needs_harmonization       = tolower(coalesce(role_raw, "")) %in% c("other", "other (please specify)"),
-      preliminary_category      = map_prelim_role(role_raw, role_other),
-      final_category_appendix_j = NA_character_
-    ) %>%
-    arrange(respondent_id) %>%
-    distinct(respondent_id, .keep_all = TRUE)
-
-  readr::write_csv(template, config$output_paths$template)
-  cli::cli_inform(paste("✓ Classification template ->", normalizePath(config$output_paths$template)))
-
-  out_prelim <- an_basic %>%
-    left_join(template %>% select(respondent_id, preliminary_category), by = "respondent_id") %>%
-    rename(stakeholder_category = preliminary_category) %>%
-    arrange(respondent_id) %>%
-    distinct(respondent_id, .keep_all = TRUE)
-
-  readr::write_csv(out_prelim, config$output_paths$preliminary)
-  cli::cli_inform(paste("✓ Preliminary classified data ->", normalizePath(config$output_paths$preliminary)))
-} else {
-  cli::cli_warn("Role column not found; skipping template and preliminary outputs.")
-}
 
 # ------------------------- Summary & dictionary -------------------------
 cli::cli_h1("ANONYMIZATION SUMMARY")
@@ -331,4 +295,23 @@ if (any(duplicated(an_basic$respondent_id))) {
   cli::cli_warn("Duplicate respondent IDs detected!")
 }
 
-cli::cli_h1("✓ PROCESS COMPLETE")
+# Progress statistics if available
+if ("Progress" %in% names(an_basic)) {
+  progress_stats <- an_basic %>%
+    summarise(
+      mean_progress = mean(Progress, na.rm = TRUE),
+      median_progress = median(Progress, na.rm = TRUE),
+      min_progress = min(Progress, na.rm = TRUE),
+      max_progress = max(Progress, na.rm = TRUE),
+      n_complete = sum(Progress >= 100, na.rm = TRUE),
+      n_sufficient = sum(Progress >= config$min_progress, na.rm = TRUE)
+    )
+  
+  cli::cli_inform("Progress statistics:")
+  cli::cli_inform(paste("  Mean:", round(progress_stats$mean_progress, 1), "%"))
+  cli::cli_inform(paste("  Median:", round(progress_stats$median_progress, 1), "%"))
+  cli::cli_inform(paste("  Complete (100%):", progress_stats$n_complete))
+  cli::cli_inform(paste("  Sufficient (>=", config$min_progress, "%):", progress_stats$n_sufficient))
+}
+
+cli::cli_h1("✓ ANONYMIZATION COMPLETE")
