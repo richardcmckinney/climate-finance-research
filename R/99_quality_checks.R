@@ -1,13 +1,14 @@
 #!/usr/bin/env Rscript
 # R/99_quality_checks.R - Comprehensive quality assurance checks
 # Purpose: Run comprehensive quality checks on pipeline outputs
-# Version: 1.1
+# Version: 1.2
 # Author: Pipeline QA System
 # 
 # FIXES APPLIED:
 # - Removed disconnected code block that was running on every source
 # - Fixed column name checks to remove undefined 'quota_target_category'
 # - All verification logic now properly encapsulated in functions
+# - Column consistency checks now use APPENDIX_J_CONFIG instead of hardcoded values
 
 suppressPackageStartupMessages({
   library(tidyverse)
@@ -16,6 +17,9 @@ suppressPackageStartupMessages({
 
 # Source central configuration
 source("R/00_config.R")
+
+# Source Appendix J configuration for role column names
+source("R/appendix_j_config.R")
 
 # =============================================================================
 # MAIN QUALITY CHECK FUNCTION
@@ -57,27 +61,46 @@ run_quality_checks <- function(verbose = TRUE, save_report = TRUE) {
   
   column_check_results <- list()
   
-  # Check final dataset for standard role column
+  # Check final dataset for standard role column using configuration
   if (file.exists(PATHS$final_1307)) {
     df_final <- readr::read_csv(PATHS$final_1307, show_col_types = FALSE, n_max = 10)
-    # Check for standard role columns (removed undefined quota_target_category)
-    role_ok  <- any(c("Final_Role_Category", "final_category_appendix_j") %in% names(df_final))
+    # Use role_column_candidates from APPENDIX_J_CONFIG instead of hardcoded values
+    role_ok  <- any(APPENDIX_J_CONFIG$role_column_candidates %in% names(df_final))
     column_check_results$final_role <- role_ok
     column_check_results$final_progress <- "Progress" %in% names(df_final)
+    
+    # Store which role column was found for detailed reporting
+    if (role_ok) {
+      found_role_col <- APPENDIX_J_CONFIG$role_column_candidates[
+        APPENDIX_J_CONFIG$role_column_candidates %in% names(df_final)
+      ][1]
+      column_check_results$final_role_column <- found_role_col
+    }
   } else {
     column_check_results$final_role <- NA
     column_check_results$final_progress <- NA
   }
   
-  # Check preliminary classified for standard role column
+  # Check preliminary classified for standard role column using configuration
   if (file.exists(PATHS$preliminary_classified)) {
     df_prelim <- readr::read_csv(PATHS$preliminary_classified, show_col_types = FALSE, n_max = 10)
-    column_check_results$prelim_role <- any(c("Final_Role_Category", "final_category_appendix_j") %in% names(df_prelim))
+    # Use role_column_candidates from APPENDIX_J_CONFIG instead of hardcoded values
+    column_check_results$prelim_role <- any(APPENDIX_J_CONFIG$role_column_candidates %in% names(df_prelim))
+    
+    # Store which role column was found for detailed reporting
+    if (column_check_results$prelim_role) {
+      found_prelim_col <- APPENDIX_J_CONFIG$role_column_candidates[
+        APPENDIX_J_CONFIG$role_column_candidates %in% names(df_prelim)
+      ][1]
+      column_check_results$prelim_role_column <- found_prelim_col
+    }
   } else {
     column_check_results$prelim_role <- NA
   }
   
-  results$columns_standard <- all(unlist(column_check_results), na.rm = TRUE)
+  # Filter out the column name details when checking overall status
+  check_results_bool <- column_check_results[!grepl("_column$", names(column_check_results))]
+  results$columns_standard <- all(unlist(check_results_bool), na.rm = TRUE)
   
   check_details$columns <- list(
     status = results$columns_standard,
@@ -86,10 +109,20 @@ run_quality_checks <- function(verbose = TRUE, save_report = TRUE) {
     } else {
       "✗ Some standard columns missing"
     },
-    details = column_check_results
+    details = column_check_results,
+    config_source = "APPENDIX_J_CONFIG$role_column_candidates"
   )
   
-  if (verbose) message(check_details$columns$message)
+  if (verbose) {
+    message(check_details$columns$message)
+    # Provide additional detail about which columns were checked
+    if (verbose && !is.null(column_check_results$final_role_column)) {
+      message("  → Found role column in final: ", column_check_results$final_role_column)
+    }
+    if (verbose && !is.null(column_check_results$prelim_role_column)) {
+      message("  → Found role column in preliminary: ", column_check_results$prelim_role_column)
+    }
+  }
   
   # -------------------------------------------------------------------------
   # Check 3: No PII in outputs
@@ -311,6 +344,45 @@ run_quality_checks <- function(verbose = TRUE, save_report = TRUE) {
   if (verbose) message(check_details$dictionary$message)
   
   # -------------------------------------------------------------------------
+  # Check 9: Appendix J configuration validity
+  # -------------------------------------------------------------------------
+  if (verbose) message("\n9. Checking Appendix J configuration...")
+  
+  appendix_j_check <- list()
+  
+  # Check if configuration exists and has required elements
+  appendix_j_check$config_exists <- exists("APPENDIX_J_CONFIG")
+  
+  if (appendix_j_check$config_exists) {
+    appendix_j_check$has_role_candidates <- !is.null(APPENDIX_J_CONFIG$role_column_candidates)
+    appendix_j_check$candidates_count <- length(APPENDIX_J_CONFIG$role_column_candidates)
+    appendix_j_check$has_mappings <- !is.null(APPENDIX_J_CONFIG$role_mappings)
+  } else {
+    appendix_j_check$has_role_candidates <- FALSE
+    appendix_j_check$candidates_count <- 0
+    appendix_j_check$has_mappings <- FALSE
+  }
+  
+  results$appendix_j_config <- appendix_j_check$config_exists && 
+                               appendix_j_check$has_role_candidates && 
+                               appendix_j_check$candidates_count > 0
+  
+  check_details$appendix_j <- list(
+    status = results$appendix_j_config,
+    message = if (results$appendix_j_config) {
+      paste("✓ Appendix J configuration valid with", 
+            appendix_j_check$candidates_count, "role column candidate(s)")
+    } else if (!appendix_j_check$config_exists) {
+      "✗ APPENDIX_J_CONFIG not found"
+    } else {
+      "✗ APPENDIX_J_CONFIG missing required elements"
+    },
+    details = appendix_j_check
+  )
+  
+  if (verbose) message(check_details$appendix_j$message)
+  
+  # -------------------------------------------------------------------------
   # Generate Summary Report
   # -------------------------------------------------------------------------
   
@@ -391,6 +463,9 @@ run_quality_checks <- function(verbose = TRUE, save_report = TRUE) {
       }
       if (!results$columns_standard) {
         message("  • Run pipeline with updated scripts to standardize column names")
+      }
+      if (!results$appendix_j_config) {
+        message("  • Verify appendix_j_config.R is properly configured")
       }
     } else {
       message("\n✅ All quality checks passed!")
@@ -526,6 +601,48 @@ generate_verification_report <- function(save_to_file = TRUE) {
   return(report)
 }
 
+# Check role column consistency across pipeline
+check_role_column_consistency <- function() {
+  message("\nRole Column Consistency Check:")
+  message("Configuration defines ", length(APPENDIX_J_CONFIG$role_column_candidates), 
+          " candidate column(s):")
+  
+  for (col in APPENDIX_J_CONFIG$role_column_candidates) {
+    message("  - ", col)
+  }
+  
+  files_to_check <- list(
+    "Final 1307" = PATHS$final_1307,
+    "Preliminary Classified" = PATHS$preliminary_classified,
+    "Classification Template" = PATHS$classification_template
+  )
+  
+  results <- list()
+  
+  for (name in names(files_to_check)) {
+    path <- files_to_check[[name]]
+    if (file.exists(path)) {
+      df <- readr::read_csv(path, show_col_types = FALSE, n_max = 1)
+      found_cols <- APPENDIX_J_CONFIG$role_column_candidates[
+        APPENDIX_J_CONFIG$role_column_candidates %in% names(df)
+      ]
+      
+      if (length(found_cols) > 0) {
+        message("\n✓ ", name, " has role column: ", paste(found_cols, collapse = ", "))
+        results[[name]] <- found_cols
+      } else {
+        message("\n✗ ", name, " missing role column")
+        results[[name]] <- character(0)
+      }
+    } else {
+      message("\n⚠ ", name, " file not found")
+      results[[name]] <- NA
+    }
+  }
+  
+  return(results)
+}
+
 # =============================================================================
 # RUN IF CALLED DIRECTLY
 # =============================================================================
@@ -538,6 +655,9 @@ if (!interactive() && length(commandArgs(trailingOnly = TRUE)) == 0) {
   # Also generate checksums and verification report when run directly
   generate_checksums(save_to_file = TRUE)
   generate_verification_report(save_to_file = TRUE)
+  
+  # Run role column consistency check
+  role_consistency <- check_role_column_consistency()
   
   # Exit with appropriate code
   if (results$overall_status == "PASSED") {
