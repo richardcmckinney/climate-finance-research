@@ -1,10 +1,17 @@
 #!/usr/bin/env Rscript
 # R/99_quality_checks.R - Comprehensive quality assurance checks
 # Purpose: Run comprehensive quality checks on pipeline outputs with enhanced diagnostics
-# Version: 2.2
+# Version: 3.0
 # Author: Pipeline QA System
 # 
-# ENHANCEMENTS:
+# ENHANCEMENTS (v3.0):
+# - Added fail-fast assertions for critical artifacts
+# - Enhanced Appendix J validation with exact count verification
+# - Added Bonferroni correction verification in hypothesis tables
+# - Added CFA file existence warning
+# - Improved error reporting with specific artifact requirements
+# 
+# PREVIOUS ENHANCEMENTS (v2.2):
 # - Fixed main execution block to ensure script runs when called from pipeline
 # - Added command-line argument support for flexibility
 # - Enhanced cli package usage for better formatted output
@@ -40,6 +47,7 @@ parse_arguments <- function() {
     checksums = TRUE,
     verification = TRUE,
     role_check = TRUE,
+    fail_fast = TRUE,  # New: fail-fast mode for critical artifacts
     help = FALSE
   )
   
@@ -57,11 +65,14 @@ parse_arguments <- function() {
       settings$verification <- FALSE
     } else if (arg %in% c("--no-role-check")) {
       settings$role_check <- FALSE
+    } else if (arg %in% c("--no-fail-fast")) {
+      settings$fail_fast <- FALSE
     } else if (arg %in% c("--minimal", "-m")) {
       # Minimal mode: just run checks, no extras
       settings$checksums <- FALSE
       settings$verification <- FALSE
       settings$role_check <- FALSE
+      settings$fail_fast <- FALSE
     }
   }
   
@@ -82,6 +93,7 @@ Options:
   --no-checksums      Skip checksum generation
   --no-verification   Skip verification report generation
   --no-role-check     Skip role column consistency check
+  --no-fail-fast      Continue even if critical artifacts are missing
   --minimal, -m       Run minimal checks only (no extras)
 
 Examples:
@@ -94,6 +106,265 @@ Exit codes:
   1 - Some checks failed
   2 - Critical error during execution
 ")
+}
+
+# =============================================================================
+# CRITICAL ARTIFACT VALIDATION (NEW)
+# =============================================================================
+
+validate_critical_artifacts <- function(verbose = TRUE) {
+  # Fail-fast validation of critical artifacts promised in manuscript
+  
+  if (verbose) {
+    cli_h1("CRITICAL ARTIFACT VALIDATION")
+    cli_alert_info("Checking for required manuscript artifacts...")
+  }
+  
+  # Define critical artifacts that MUST exist
+  critical_artifacts <- c(
+    "Final Dataset (N=1307)" = PATHS$final_1307,
+    "EFA Results" = PATHS$efa,
+    "ANOVA Results" = PATHS$anova,
+    "Correlations" = PATHS$correlations,
+    "Proportion CIs" = PATHS$proportion_cis
+  )
+  
+  # Check each critical artifact
+  missing_artifacts <- c()
+  artifact_status <- list()
+  
+  for (name in names(critical_artifacts)) {
+    path <- critical_artifacts[[name]]
+    exists <- file.exists(path)
+    artifact_status[[name]] <- exists
+    
+    if (!exists) {
+      missing_artifacts <- c(missing_artifacts, sprintf("%s (%s)", name, basename(path)))
+      if (verbose) {
+        cli_alert_danger("{name} MISSING at: {path}")
+      }
+    } else {
+      if (verbose) {
+        cli_alert_success("{name} found: {basename(path)}")
+      }
+    }
+  }
+  
+  # Check for CFA (optional but warn if missing)
+  if (!is.null(PATHS$cfa) && !file.exists(PATHS$cfa)) {
+    if (verbose) {
+      cli_alert_warning("CFA output missing at {PATHS$cfa}")
+      cli_alert_info("If CFA is referenced in manuscript, this file should exist")
+    }
+  }
+  
+  # Return validation results
+  return(list(
+    all_present = length(missing_artifacts) == 0,
+    missing = missing_artifacts,
+    status = artifact_status
+  ))
+}
+
+# =============================================================================
+# APPENDIX J EXACT VALIDATION (ENHANCED)
+# =============================================================================
+
+validate_appendix_j_exact <- function(verbose = TRUE) {
+  # Strict validation of Appendix J quota targets
+  
+  if (verbose) {
+    cli_h2("Appendix J Exact Count Validation")
+  }
+  
+  # Check if final dataset exists
+  if (!file.exists(PATHS$final_1307)) {
+    if (verbose) {
+      cli_alert_danger("Cannot validate Appendix J: final_1307 not found")
+    }
+    return(list(success = FALSE, reason = "Final dataset missing"))
+  }
+  
+  # Read final dataset
+  final_df <- readr::read_csv(PATHS$final_1307, show_col_types = FALSE)
+  
+  # Check total N
+  actual_n <- nrow(final_df)
+  if (actual_n != 1307) {
+    if (verbose) {
+      cli_alert_danger("Total N = {actual_n}, expected 1307")
+    }
+    return(list(success = FALSE, reason = sprintf("N mismatch: %d != 1307", actual_n)))
+  }
+  
+  # Find the role column
+  role_col <- NULL
+  for (candidate in APPENDIX_J_CONFIG$role_column_candidates) {
+    if (candidate %in% names(final_df)) {
+      role_col <- candidate
+      break
+    }
+  }
+  
+  if (is.null(role_col)) {
+    # Try Final_Role_Category as fallback
+    if ("Final_Role_Category" %in% names(final_df)) {
+      role_col <- "Final_Role_Category"
+    } else if ("quota_target_category" %in% names(final_df)) {
+      role_col <- "quota_target_category"
+    } else {
+      if (verbose) {
+        cli_alert_danger("No role column found for Appendix J validation")
+      }
+      return(list(success = FALSE, reason = "No role column found"))
+    }
+  }
+  
+  # Get actual counts
+  actual_counts <- final_df %>%
+    count(!!sym(role_col), name = "n") %>%
+    arrange(!!sym(role_col))
+  
+  # Get target counts
+  target_df <- get_appendix_j_target()
+  
+  # Match categories and compare
+  mismatches <- list()
+  for (i in seq_len(nrow(actual_counts))) {
+    category <- actual_counts[[role_col]][i]
+    actual <- actual_counts$n[i]
+    
+    # Find matching target
+    target_idx <- which(target_df$Category == category)
+    if (length(target_idx) == 0) {
+      mismatches[[length(mismatches) + 1]] <- list(
+        category = category,
+        actual = actual,
+        target = NA,
+        issue = "Category not in target"
+      )
+    } else {
+      target <- target_df$Target[target_idx]
+      if (actual != target) {
+        mismatches[[length(mismatches) + 1]] <- list(
+          category = category,
+          actual = actual,
+          target = target,
+          issue = sprintf("Count mismatch: %d != %d", actual, target)
+        )
+      }
+    }
+  }
+  
+  # Report results
+  if (length(mismatches) > 0) {
+    if (verbose) {
+      cli_alert_danger("Appendix J validation FAILED: {length(mismatches)} mismatch(es)")
+      for (mm in mismatches) {
+        cli_alert_info("  {mm$category}: {mm$issue}")
+      }
+    }
+    return(list(success = FALSE, mismatches = mismatches))
+  } else {
+    if (verbose) {
+      cli_alert_success("Appendix J counts match exactly (N=1307)")
+    }
+    return(list(success = TRUE))
+  }
+}
+
+# =============================================================================
+# BONFERRONI CORRECTION VALIDATION (NEW)
+# =============================================================================
+
+validate_bonferroni_correction <- function(verbose = TRUE) {
+  # Check that hypothesis testing tables use Bonferroni (not BH) correction
+  
+  if (verbose) {
+    cli_h2("Multiple Comparisons Correction Validation")
+  }
+  
+  results <- list()
+  files_checked <- 0
+  bonferroni_found <- FALSE
+  bh_found <- FALSE
+  
+  # Define hypothesis testing output files to check
+  hypothesis_files <- c(
+    "ANOVA" = PATHS$anova,
+    "Correlations" = PATHS$correlations,
+    "Hypothesis Tests" = if (!is.null(PATHS$hypothesis_tests)) PATHS$hypothesis_tests else NULL
+  )
+  
+  # Remove NULL entries
+  hypothesis_files <- hypothesis_files[!sapply(hypothesis_files, is.null)]
+  
+  for (name in names(hypothesis_files)) {
+    path <- hypothesis_files[[name]]
+    if (file.exists(path)) {
+      files_checked <- files_checked + 1
+      
+      # Read file and check for correction method
+      if (grepl("\\.csv$", path)) {
+        df <- readr::read_csv(path, show_col_types = FALSE)
+        
+        # Check column names for correction indicators
+        col_names_lower <- tolower(names(df))
+        if (any(grepl("bonferroni", col_names_lower))) {
+          bonferroni_found <- TRUE
+          if (verbose) {
+            cli_alert_success("{name}: Bonferroni correction column found")
+          }
+        }
+        if (any(grepl("bh|benjamini|fdr", col_names_lower))) {
+          bh_found <- TRUE
+          if (verbose) {
+            cli_alert_warning("{name}: BH/FDR correction detected (should use Bonferroni)")
+          }
+        }
+        
+        # Check data values if character columns exist
+        char_cols <- names(df)[sapply(df, is.character)]
+        if (length(char_cols) > 0) {
+          all_text <- tolower(paste(unlist(df[char_cols]), collapse = " "))
+          if (grepl("bonferroni", all_text)) {
+            bonferroni_found <- TRUE
+          }
+          if (grepl("benjamini|hochberg|\\bbh\\b|fdr", all_text)) {
+            bh_found <- TRUE
+          }
+        }
+      }
+    }
+  }
+  
+  # Determine overall status
+  if (files_checked == 0) {
+    if (verbose) {
+      cli_alert_warning("No hypothesis testing files found to check")
+    }
+    return(list(success = NA, reason = "No files to check"))
+  }
+  
+  if (bh_found) {
+    if (verbose) {
+      cli_alert_danger("BH/FDR correction detected - manuscript requires Bonferroni")
+    }
+    return(list(success = FALSE, reason = "Using BH instead of Bonferroni"))
+  }
+  
+  if (!bonferroni_found) {
+    if (verbose) {
+      cli_alert_warning("Bonferroni correction not explicitly found in outputs")
+      cli_alert_info("Ensure hypothesis tests use Bonferroni correction as stated in manuscript")
+    }
+    return(list(success = NA, reason = "Bonferroni not explicitly found"))
+  }
+  
+  if (verbose) {
+    cli_alert_success("Bonferroni correction confirmed in hypothesis testing outputs")
+  }
+  return(list(success = TRUE))
 }
 
 # =============================================================================
@@ -144,11 +415,33 @@ report_check <- function(name, status, message_ok, message_fail, details = NULL,
 # MAIN QUALITY CHECK FUNCTION WITH ENHANCED DIAGNOSTICS
 # =============================================================================
 
-run_quality_checks <- function(verbose = TRUE, save_report = TRUE) {
+run_quality_checks <- function(verbose = TRUE, save_report = TRUE, fail_fast = TRUE) {
   
   if (verbose) {
     cli_h1("RUNNING COMPREHENSIVE QUALITY CHECKS")
     cli_alert_info("Starting at {Sys.time()}")
+  }
+  
+  # -------------------------------------------------------------------------
+  # CRITICAL VALIDATION FIRST (if fail_fast enabled)
+  # -------------------------------------------------------------------------
+  
+  if (fail_fast) {
+    critical_validation <- validate_critical_artifacts(verbose)
+    if (!critical_validation$all_present) {
+      cli_alert_danger("CRITICAL ARTIFACTS MISSING - STOPPING")
+      cli_alert_danger("Missing: {paste(critical_validation$missing, collapse = ', ')}")
+      stop("Critical artifacts missing. Cannot proceed with quality checks.\n",
+           "Missing files: ", paste(critical_validation$missing, collapse = ", "))
+    }
+    
+    # Validate Appendix J exact counts
+    appendix_j_validation <- validate_appendix_j_exact(verbose)
+    if (!appendix_j_validation$success) {
+      cli_alert_danger("APPENDIX J VALIDATION FAILED - STOPPING")
+      stop("Appendix J count validation failed. Re-check quota selection.\n",
+           "Reason: ", appendix_j_validation$reason)
+    }
   }
   
   # Initialize results tracking
@@ -670,6 +963,25 @@ run_quality_checks <- function(verbose = TRUE, save_report = TRUE) {
   )
   
   # -------------------------------------------------------------------------
+  # Check 10: Bonferroni Correction (NEW)
+  # -------------------------------------------------------------------------
+  if (verbose) cli_h2("10. Checking multiple comparisons correction method")
+  
+  bonferroni_validation <- validate_bonferroni_correction(verbose)
+  results$bonferroni <- bonferroni_validation$success
+  
+  check_details$bonferroni <- report_check(
+    name = "Bonferroni Correction",
+    status = if (is.na(bonferroni_validation$success)) NA else bonferroni_validation$success,
+    message_ok = "Bonferroni correction confirmed in hypothesis tests",
+    message_fail = if (!is.na(bonferroni_validation$reason)) {
+      bonferroni_validation$reason
+    } else "Bonferroni correction not found",
+    details = bonferroni_validation,
+    verbose = verbose
+  )
+  
+  # -------------------------------------------------------------------------
   # Generate Summary Report with Enhanced Metrics
   # -------------------------------------------------------------------------
   
@@ -729,7 +1041,8 @@ run_quality_checks <- function(verbose = TRUE, save_report = TRUE) {
           total_checks = total_checks,
           pass_rate = round(passed_checks / total_checks * 100, 2),
           timestamp = Sys.time(),
-          r_version = R.version.string
+          r_version = R.version.string,
+          fail_fast_enabled = fail_fast
         ),
         results = results,
         details = check_details,
@@ -847,6 +1160,12 @@ generate_recommendations <- function(results, details) {
     recommendations <- c(recommendations,
       "Update data dictionary to match current data structure",
       "Regenerate dictionary using create_data_dictionary.R")
+  }
+  
+  if (!isTRUE(results$bonferroni)) {
+    recommendations <- c(recommendations,
+      "Ensure hypothesis tests use Bonferroni correction (not BH/FDR)",
+      "Update multiple comparison methods in statistical analyses")
   }
   
   return(recommendations)
@@ -1181,7 +1500,8 @@ main <- function() {
     
     results <- run_quality_checks(
       verbose = settings$verbose, 
-      save_report = settings$save_report
+      save_report = settings$save_report,
+      fail_fast = settings$fail_fast
     )
     
     # Generate checksums if requested

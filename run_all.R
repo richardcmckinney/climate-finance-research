@@ -1,16 +1,17 @@
 #!/usr/bin/env Rscript
-# run_all.R - Pipeline Runner v5.0
+# run_all.R - Pipeline Runner v6.0
 # Purpose: Execute the complete data processing and analysis pipeline
 # Description: Orchestrates all pipeline stages with enhanced error handling,
-#              reproducible dependency management, and configuration-based settings
+#              reproducible dependency management, configuration-based settings,
+#              and manuscript reproducibility manifest generation
 # Author: Richard McKinney
 # Date: 2025-08-09
 #
 # Flags:
-#   --clean           Remove all outputs before running
+#   --clean           Remove all outputs before running (including output/ directory)
 #   --verify          Run verification checks (default: TRUE)
 #   --no-verify       Skip verification checks
-#   --with-analysis   Run full manuscript analysis stage (N=1307 subset, figures, tables)
+#   --with-analysis   Run full manuscript analysis stage (REQUIRES N=1307 subset)
 #   --debug           Enable verbose debug output
 #   --checkpoint      Save state after each major step
 #   --force           Continue pipeline even after errors
@@ -74,13 +75,14 @@ FORCE_CONTINUE <- "--force" %in% args || "-f" %in% args
 # Show help if requested
 if (HELP) {
   cat("
-Climate Finance Research Pipeline Runner v5.0
+Climate Finance Research Pipeline Runner v6.0
 
 Usage: Rscript run_all.R [OPTIONS]
 
 Options:
-  --clean, -c         Remove all outputs before running
-  --with-analysis, -a Include full analysis stage (figures & hypothesis testing)
+  --clean, -c         Remove ALL outputs before running (including output/ directory)
+  --with-analysis, -a Include full analysis stage (REQUIRES N=1,307 final dataset)
+                      Generates manuscript figures, tables, and reproducibility manifest
   --no-verify, -nv    Skip verification checks
   --debug, -d         Enable verbose debug output
   --checkpoint, -cp   Save state after each major step
@@ -89,12 +91,18 @@ Options:
 
 Examples:
   Rscript run_all.R                    # Run base pipeline with verification
-  Rscript run_all.R --clean            # Clean and run base pipeline
-  Rscript run_all.R --with-analysis    # Run full pipeline including analysis
-  Rscript run_all.R -c -a --checkpoint # Clean and run full pipeline with checkpoints
+  Rscript run_all.R --clean            # Clean ALL outputs and run base pipeline
+  Rscript run_all.R --with-analysis    # Run full pipeline including manuscript analysis
+  Rscript run_all.R -c -a --checkpoint # Clean all, run full pipeline with checkpoints
   Rscript run_all.R --force            # Continue on errors (use with caution)
 
 Default behavior: Runs base pipeline with verification, no cleaning, no analysis.
+
+NEW IN v6.0:
+  - Enhanced --clean flag removes entire output/ directory
+  - --with-analysis REQUIRES final_1307 dataset (N=1,307)
+  - Generates reproducibility manifest mapping manuscript claims to artifacts
+  - Improved validation for manuscript-ready outputs
 
 Dependencies: This pipeline uses 'renv' for reproducible package management.
               Run 'renv::restore()' to install all required packages.
@@ -106,7 +114,7 @@ Dependencies: This pipeline uses 'renv' for reproducible package management.
 # 3. EARLY DIRECTORY CREATION FOR LOGGING
 # =============================================================================
 
-essential_dirs <- c("docs", "logs", "output", "data", "figures", "checkpoints")
+essential_dirs <- c("docs", "logs", "output", "data", "figures", "checkpoints", "output/manifests")
 for (dir in essential_dirs) {
   dir.create(dir, showWarnings = FALSE, recursive = TRUE)
 }
@@ -162,7 +170,7 @@ core_packages <- c(
 
 analysis_packages <- c(
   "ggplot2", "psych", "lavaan", "scales", "corrplot",
-  "broom", "effectsize", "car", "nnet", "MASS"
+  "broom", "effectsize", "car", "nnet", "MASS", "binom"
 )
 
 # Check for missing core packages
@@ -211,13 +219,14 @@ suppressPackageStartupMessages({
   library(cli)
   library(dplyr)
   library(readr)
+  library(tibble)
 })
 
 # =============================================================================
 # 5. LOAD CENTRAL CONFIGURATION & SET SEED
 # =============================================================================
 
-cli::cli_h1("Climate Finance Research Pipeline v5.0")
+cli::cli_h1("Climate Finance Research Pipeline v6.0")
 
 # Source configuration files
 config_file <- "R/00_config.R"
@@ -242,7 +251,7 @@ if (!exists("PATHS") || !is.list(PATHS)) {
   cli::cli_abort("PATHS configuration not found after sourcing {config_file}")
 }
 
-# USE CONFIGURATION-BASED SEED (FIX FOR ISSUE #2)
+# USE CONFIGURATION-BASED SEED
 if (exists("PIPELINE_SEED")) {
   set.seed(PIPELINE_SEED)
   cli::cli_alert_info("Using pipeline seed: {PIPELINE_SEED}")
@@ -254,7 +263,7 @@ if (exists("PIPELINE_SEED")) {
 }
 
 # =============================================================================
-# 6. ENHANCED ERROR HANDLING SYSTEM (FIX FOR ISSUE #3)
+# 6. ENHANCED ERROR HANDLING SYSTEM
 # =============================================================================
 
 # Global error state tracking
@@ -350,7 +359,7 @@ save_checkpoint <- function(stage, success = TRUE) {
 }
 
 # Enhanced script runner with comprehensive error handling
-run_script <- function(path, stage_name = NULL) {
+run_script <- function(path, stage_name = NULL, require_output = NULL) {
   stage_name <- stage_name %||% tools::file_path_sans_ext(basename(path))
   
   # Update global tracking
@@ -396,7 +405,7 @@ run_script <- function(path, stage_name = NULL) {
   
   # Copy other configurations if they exist
   config_objects <- c("STANDARD_COLUMNS", "QUALITY_PARAMS", 
-                     "DEPRECATED_PATHS", "PRIVACY_COLUMNS")
+                     "DEPRECATED_PATHS", "PRIVACY_COLUMNS", "APPENDIX_J_CONFIG")
   for (obj in config_objects) {
     if (exists(obj)) {
       script_env[[obj]] <- get(obj)
@@ -415,6 +424,13 @@ run_script <- function(path, stage_name = NULL) {
       source(path, local = script_env, echo = TRUE, verbose = TRUE)
     } else {
       suppressMessages(source(path, local = script_env, echo = FALSE))
+    }
+    
+    # Check for required output if specified
+    if (!is.null(require_output) && !file.exists(require_output)) {
+      cli::cli_alert_danger("Required output not generated: {basename(require_output)}")
+      return(list(success = FALSE, time = difftime(Sys.time(), start_time, units = "secs"),
+                  error = paste("Missing required output:", require_output)))
     }
     
     # Success
@@ -513,14 +529,38 @@ if (DEBUG) {
 }
 
 # =============================================================================
-# 9. OPTIONAL CLEANING
+# 9. ENHANCED CLEANING (v6.0 - Cleans entire output/ directory)
 # =============================================================================
 
 if (CLEAN) {
   pipeline_stage <- "Cleaning"
-  cli::cli_h2("Cleaning Previous Outputs")
+  cli::cli_h2("Cleaning Previous Outputs (ENHANCED)")
   
-  # Define files to remove from configuration
+  # v6.0 Enhancement: Remove entire output directory
+  if (dir.exists("output")) {
+    cli::cli_alert_warning("Removing entire output/ directory...")
+    unlink("output", recursive = TRUE, force = TRUE)
+    cli::cli_alert_success("Removed output/ directory")
+    
+    # Recreate essential subdirectories
+    dir.create("output", showWarnings = FALSE)
+    dir.create("output/manifests", showWarnings = FALSE, recursive = TRUE)
+    dir.create("output/tables", showWarnings = FALSE, recursive = TRUE)
+    cli::cli_alert_info("Recreated output structure")
+  }
+  
+  # Also clean figures and checkpoints if doing full clean
+  if (WITH_ANALYSIS) {
+    for (dir in c("figures", "checkpoints")) {
+      if (dir.exists(dir)) {
+        unlink(dir, recursive = TRUE)
+        dir.create(dir, showWarnings = FALSE)
+        cli::cli_alert_info("Cleaned directory: {dir}")
+      }
+    }
+  }
+  
+  # Clean specific files from data/ and docs/
   files_to_remove <- c(
     PATHS$basic_anon,
     PATHS$preliminary_classified,
@@ -528,13 +568,8 @@ if (CLEAN) {
     PATHS$dictionary,
     PATHS$final_1307,
     PATHS$checksums,
-    PATHS$verification_report,
-    PATHS$quality_assurance
+    PATHS$verification_report
   )
-  
-  # Add log files
-  log_files <- list.files("logs", full.names = TRUE)
-  files_to_remove <- c(files_to_remove, log_files)
   
   # Remove NULL paths
   files_to_remove <- files_to_remove[!sapply(files_to_remove, is.null)]
@@ -549,18 +584,14 @@ if (CLEAN) {
     }
   }
   
-  # Clean directories for full clean
-  if (WITH_ANALYSIS) {
-    for (dir in c("output", "figures", "checkpoints")) {
-      if (dir.exists(dir)) {
-        unlink(dir, recursive = TRUE)
-        dir.create(dir, showWarnings = FALSE)
-        if (DEBUG) cli::cli_alert_info("Cleaned directory: {dir}")
-      }
-    }
+  # Clean log files
+  log_files <- list.files("logs", full.names = TRUE)
+  if (length(log_files) > 0) {
+    unlink(log_files)
+    cli::cli_alert_info("Cleaned {length(log_files)} log file{?s}")
   }
   
-  cli::cli_alert_success("Cleaned {removed_count} file{?s} and director{?y/ies}")
+  cli::cli_alert_success("Cleaning complete: removed {removed_count} file{?s} and all outputs")
 }
 
 # Check for deprecated files
@@ -591,10 +622,14 @@ scripts_base <- c(
   "R/02_classify_stakeholders.R"
 )
 
+scripts_quota <- c(
+  "R/get_exact_1307.R"
+)
+
 scripts_analysis <- c(
-  "R/get_exact_1307.R",
   "R/03_main_analysis.R",
-  "R/04_hypothesis_testing.R"
+  "R/04_hypothesis_testing.R",
+  "R/99_quality_checks.R"
 )
 
 # Validate scripts exist
@@ -617,6 +652,8 @@ validate_scripts <- function(script_list, stage_name) {
 
 # Validate and filter scripts
 scripts_base <- validate_scripts(scripts_base, "base pipeline")
+scripts_quota <- validate_scripts(scripts_quota, "quota matching")
+
 if (WITH_ANALYSIS) {
   scripts_analysis <- validate_scripts(scripts_analysis, "analysis pipeline")
 }
@@ -647,10 +684,55 @@ if (!base_success) {
   cli::cli_alert_warning("Base pipeline completed with errors")
 }
 
-# Execute analysis pipeline (conditional)
+# Execute quota matching to generate final_1307
+pipeline_stage <- "Quota Matching"
+cli::cli_h2("Stage 2: Quota Matching (N=1,307)")
+
+quota_success <- TRUE
+for (script in scripts_quota) {
+  stage_id <- paste0("quota_", tools::file_path_sans_ext(basename(script)))
+  result <- run_script(script, stage_name = stage_id, require_output = PATHS$final_1307)
+  
+  execution_summary[[stage_id]] <- result
+  
+  if (!result$success) {
+    quota_success <- FALSE
+    if (!FORCE_CONTINUE) {
+      cli::cli_abort(c(
+        "Pipeline halted: Failed to generate final_1307 dataset",
+        "i" = "This is required for analysis. Use --force to skip"
+      ))
+    }
+  }
+}
+
+# =============================================================================
+# 11. ANALYSIS PIPELINE WITH STRICT REQUIREMENTS (v6.0 Enhancement)
+# =============================================================================
+
 if (WITH_ANALYSIS) {
   pipeline_stage <- "Analysis Pipeline"
-  cli::cli_h2("Stage 2: Analysis & Hypothesis Testing")
+  cli::cli_h2("Stage 3: Manuscript Analysis & Hypothesis Testing")
+  
+  # v6.0: STRICT REQUIREMENT - final_1307 must exist
+  if (!file.exists(PATHS$final_1307)) {
+    cli::cli_abort(c(
+      "Cannot run analysis: final_1307 dataset not found",
+      "x" = "Expected at: {PATHS$final_1307}",
+      "i" = "Run quota matching first or remove --with-analysis flag"
+    ))
+  }
+  
+  # Verify it's the correct N=1,307 dataset
+  df_check <- readr::read_csv(PATHS$final_1307, show_col_types = FALSE, progress = FALSE)
+  if (nrow(df_check) != 1307) {
+    cli::cli_abort(c(
+      "Invalid final dataset: has {nrow(df_check)} rows, expected 1,307",
+      "x" = "The manuscript analysis requires exactly N=1,307",
+      "i" = "Re-run quota matching or check data pipeline"
+    ))
+  }
+  cli::cli_alert_success("Verified final_1307 dataset (N={nrow(df_check)})")
   
   analysis_success <- TRUE
   for (script in scripts_analysis) {
@@ -673,8 +755,159 @@ if (WITH_ANALYSIS) {
   if (!analysis_success) {
     cli::cli_alert_warning("Analysis pipeline completed with errors")
   }
+  
+  # =============================================================================
+  # 12. GENERATE REPRODUCIBILITY MANIFEST (v6.0 NEW FEATURE)
+  # =============================================================================
+  
+  cli::cli_h2("Generating Reproducibility Manifest for Manuscript")
+  
+  # Create comprehensive manifest mapping claims to artifacts
+  manifest <- tibble::tibble(
+    manuscript_claim = c(
+      "N=1,307 final sample size",
+      "23 stakeholder categories (Appendix J)",
+      "Category-specific sample sizes",
+      "Geographic distribution (anonymized)",
+      "EFA 3-factor model variance explained",
+      "KMO adequacy (>0.5)",
+      "Bartlett's test significance",
+      "Headline barrier percentages",
+      "Wilson 95% confidence intervals",
+      "Technology risk perception (H1)",
+      "Government agency sensitivity (H2)",
+      "Tech-market correlation (H3)",
+      "Market readiness barrier (H4)",
+      "VC vs Government barriers (H5)",
+      "International scalability (H6)",
+      "Ecosystem-collaboration (H7)",
+      "European regulatory concern (H8)",
+      "Impact orientation (H9)",
+      "Within-group coherence (H10)",
+      "Physical-operational correlation (H11)",
+      "Technology solutions (H12)",
+      "ANOVA F-statistics",
+      "Effect sizes (η², Cramér's V)",
+      "Correlation coefficients",
+      "Ordinal regression results",
+      "Sample size adequacy checks"
+    ),
+    artifact_path = c(
+      PATHS$final_1307 %||% "data/climate_finance_survey_final_1307.csv",
+      PATHS$appendix_j_template %||% "docs/appendix_j_classification_template.csv",
+      PATHS$category_counts %||% "output/manifests/category_counts.csv",
+      PATHS$region_summary %||% "output/region_summary_final_1307.csv",
+      PATHS$efa %||% "output/efa_results.csv",
+      PATHS$efa %||% "output/efa_results.csv",
+      PATHS$efa %||% "output/efa_results.csv",
+      PATHS$headline_barriers_by_role %||% "output/headline_barriers_by_role.csv",
+      "output/headline_barriers_by_role_wilson.csv",
+      "output/hypothesis_testing_summary.csv",
+      "output/hypothesis_testing_summary.csv",
+      "output/hypothesis_testing_summary.csv",
+      "output/hypothesis_testing_summary.csv",
+      "output/hypothesis_testing_summary.csv",
+      "output/hypothesis_testing_summary.csv",
+      "output/hypothesis_testing_summary.csv",
+      "output/hypothesis_testing_summary.csv",
+      "output/hypothesis_testing_summary.csv",
+      "output/hypothesis_testing_summary.csv",
+      "output/hypothesis_testing_summary.csv",
+      "output/hypothesis_testing_summary.csv",
+      PATHS$anova %||% "output/anova_tests.csv",
+      "output/hypothesis_testing_summary.csv",
+      PATHS$correlations %||% "output/correlations.csv",
+      "output/tables/ordinal_regression_physical.csv",
+      "output/sample_size_adequacy.csv"
+    ),
+    verification_method = c(
+      "Count rows in final_1307.csv",
+      "Count unique categories in template",
+      "Check category_counts.csv",
+      "Review region_summary.csv",
+      "Check 'Total Variance Explained' in efa_results.csv",
+      "Check 'KMO MSA' value in efa_results.csv",
+      "Check 'Bartlett p-value' in efa_results.csv",
+      "Review percentages in headline_barriers_by_role.csv",
+      "Check ci_lower_pct and ci_upper_pct columns",
+      "Check H1 row in hypothesis_testing_summary.csv",
+      "Check H2 row in hypothesis_testing_summary.csv",
+      "Check H3 row in hypothesis_testing_summary.csv",
+      "Check H4 row in hypothesis_testing_summary.csv",
+      "Check H5 row in hypothesis_testing_summary.csv",
+      "Check H6 row in hypothesis_testing_summary.csv",
+      "Check H7 row in hypothesis_testing_summary.csv",
+      "Check H8 row in hypothesis_testing_summary.csv",
+      "Check H9 row in hypothesis_testing_summary.csv",
+      "Check H10 row in hypothesis_testing_summary.csv",
+      "Check H11 row in hypothesis_testing_summary.csv",
+      "Check H12 row in hypothesis_testing_summary.csv",
+      "Review F-statistics in anova_tests.csv",
+      "Check Effect_Size column in summary",
+      "Review correlation matrix",
+      "Check odds ratios in regression output",
+      "Review adequacy flags in output"
+    ),
+    file_exists = sapply(artifact_path, file.exists),
+    last_modified = sapply(artifact_path, function(f) {
+      if (file.exists(f)) format(file.mtime(f), "%Y-%m-%d %H:%M:%S") else NA_character_
+    })
+  )
+  
+  # Add execution metadata
+  manifest <- manifest %>%
+    mutate(
+      pipeline_version = "6.0",
+      execution_timestamp = format(Sys.time(), "%Y-%m-%d %H:%M:%S %Z"),
+      random_seed = PIPELINE_SEED,
+      r_version = R.version.string
+    )
+  
+  # Save manifest
+  manifest_dir <- PATHS$manifests %||% "output/manifests"
+  dir.create(manifest_dir, showWarnings = FALSE, recursive = TRUE)
+  
+  manifest_path <- file.path(manifest_dir, "reproducibility_manifest.csv")
+  readr::write_csv(manifest, manifest_path, na = "")
+  cli::cli_alert_success("Reproducibility manifest saved: {manifest_path}")
+  
+  # Also save as markdown for easy reading
+  manifest_md <- paste0(
+    "# Reproducibility Manifest\n\n",
+    "Generated: ", format(Sys.time(), "%Y-%m-%d %H:%M:%S %Z"), "\n",
+    "Pipeline Version: 6.0\n",
+    "Random Seed: ", PIPELINE_SEED, "\n",
+    "R Version: ", R.version.string, "\n\n",
+    "## Manuscript Claims and Supporting Artifacts\n\n",
+    "| Claim | Artifact | Exists | Verification |\n",
+    "|-------|----------|--------|-------------|\n",
+    paste(apply(manifest[1:4], 1, function(row) {
+      sprintf("| %s | %s | %s | %s |",
+              substr(row[1], 1, 40),
+              basename(row[2]),
+              ifelse(row[4] == "TRUE", "✓", "✗"),
+              substr(row[3], 1, 30))
+    }), collapse = "\n"),
+    "\n\n## Missing Artifacts\n\n"
+  )
+  
+  missing_artifacts <- manifest[!manifest$file_exists, ]
+  if (nrow(missing_artifacts) > 0) {
+    manifest_md <- paste0(manifest_md,
+      "The following required artifacts are missing:\n\n",
+      paste("- ", missing_artifacts$artifact_path, collapse = "\n"),
+      "\n\n"
+    )
+  } else {
+    manifest_md <- paste0(manifest_md, "All required artifacts are present.\n\n")
+  }
+  
+  writeLines(manifest_md, file.path(manifest_dir, "reproducibility_manifest.md"))
+  cli::cli_alert_success("Markdown manifest saved: reproducibility_manifest.md")
+  
 } else {
   cli::cli_alert_info("Skipping analysis stage. Use --with-analysis flag to enable.")
+  cli::cli_alert_info("Note: --with-analysis requires the final N=1,307 dataset")
 }
 
 # Calculate execution metrics
@@ -683,7 +916,7 @@ successful_stages <- sum(sapply(execution_summary, function(x) x$success))
 total_stages <- length(execution_summary)
 
 # =============================================================================
-# 11. VERIFICATION WITH QUALITY CHECKS
+# 13. VERIFICATION WITH QUALITY CHECKS
 # =============================================================================
 
 if (VERIFY) {
@@ -692,7 +925,8 @@ if (VERIFY) {
   
   quality_script <- "R/99_quality_checks.R"
   
-  if (file.exists(quality_script)) {
+  if (file.exists(quality_script) && !WITH_ANALYSIS) {
+    # Only run if not already run in analysis stage
     cli::cli_alert_info("Running quality checks...")
     
     qa_result <- run_script(quality_script, "quality_verification")
@@ -706,7 +940,7 @@ if (VERIFY) {
       cli::cli_alert_warning("Quality checks encountered issues")
     }
     
-  } else {
+  } else if (!WITH_ANALYSIS) {
     cli::cli_alert_warning("Quality checks script not found: {quality_script}")
     
     # Fallback: Basic output verification
@@ -742,7 +976,7 @@ if (VERIFY) {
 }
 
 # =============================================================================
-# 12. EXECUTION SUMMARY & FINAL REPORT
+# 14. EXECUTION SUMMARY & FINAL REPORT
 # =============================================================================
 
 # Determine overall status
@@ -815,7 +1049,8 @@ execution_report <- list(
     checkpoint = CHECKPOINT,
     force_continue = FORCE_CONTINUE
   ),
-  execution_summary = execution_summary
+  execution_summary = execution_summary,
+  version = "6.0"
 )
 
 report_file <- file.path("output", paste0("pipeline_report_",
@@ -825,13 +1060,27 @@ saveRDS(execution_report, report_file)
 cli::cli_alert_info("Execution report saved: {report_file}")
 
 # =============================================================================
-# 13. NEXT STEPS & RECOMMENDATIONS
+# 15. NEXT STEPS & RECOMMENDATIONS
 # =============================================================================
 
 cli::cli_h2("Next Steps")
 
 if (!WITH_ANALYSIS) {
-  cli::cli_alert_info("Run with --with-analysis flag to generate full analysis outputs")
+  cli::cli_alert_info("Run with --with-analysis flag to generate:")
+  cli::cli_alert_info("  • Manuscript figures and tables")
+  cli::cli_alert_info("  • Hypothesis testing results")
+  cli::cli_alert_info("  • Reproducibility manifest")
+  cli::cli_alert_info("  Note: Requires final N=1,307 dataset")
+}
+
+if (WITH_ANALYSIS && exists("manifest")) {
+  missing_count <- sum(!manifest$file_exists)
+  if (missing_count > 0) {
+    cli::cli_alert_warning("{missing_count} manuscript artifacts missing")
+    cli::cli_alert_info("Check reproducibility_manifest.csv for details")
+  } else {
+    cli::cli_alert_success("All manuscript artifacts generated successfully!")
+  }
 }
 
 if (length(pipeline_errors) > 0 && !FORCE_CONTINUE) {
@@ -845,6 +1094,11 @@ report_files <- c(
   checksums = PATHS$checksums
 )
 
+if (WITH_ANALYSIS) {
+  report_files$manifest <- file.path(PATHS$manifests %||% "output/manifests", 
+                                     "reproducibility_manifest.csv")
+}
+
 for (name in names(report_files)) {
   if (!is.null(report_files[[name]]) && file.exists(report_files[[name]])) {
     cli::cli_alert_info("Review {name} report: {report_files[[name]]}")
@@ -856,6 +1110,13 @@ if (renv_status == "no_lockfile" || renv_status == "error") {
   cli::cli_h3("Dependency Management")
   cli::cli_alert_info("Remember to create/update renv.lock with: renv::snapshot()")
 }
+
+# v6.0 Enhancement notes
+cli::cli_h3("Version 6.0 Enhancements")
+cli::cli_alert_info("✓ Enhanced --clean removes entire output/ directory")
+cli::cli_alert_info("✓ --with-analysis strictly requires N=1,307 dataset")
+cli::cli_alert_info("✓ Reproducibility manifest maps claims to artifacts")
+cli::cli_alert_info("✓ Improved validation for manuscript-ready outputs")
 
 # Exit with appropriate status
 exit_status <- ifelse(overall_success, 0, 1)
