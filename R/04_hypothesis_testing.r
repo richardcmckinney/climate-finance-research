@@ -8,16 +8,14 @@ if (!exists(".local", inherits = TRUE)) .local <- function(...) NULL
 # ========================================================================
 # Author: Richard McKinney
 # Date: 2025-08-09
-# Version: 3.0 - Complete rewrite with configuration management
+# Version: 4.0 - Fully integrated with central configuration
 # 
-# CRITICAL FIXES APPLIED:
-# 1. Configuration-based seed management (Issue 1)
-# 2. Robust PCA requirements checking (Issue 2)
-# 3. Enhanced output directory creation (Issue 3)
-# 4. Uses quota_target_category for N=1,307 sample analysis
-# 5. Centralized column mapping to reduce redundancy
-# 6. Statistical safeguards (small cell checks, multiple testing correction)
-# 7. Q2.2 removed from geographic candidates (privacy)
+# CHANGES IN VERSION 4.0:
+# 1. Full integration with central configuration (00_config.R)
+# 2. Uses PATHS object from config for data loading
+# 3. Uses centralized column mapping and helper functions
+# 4. Removes all redundant local definitions
+# 5. Ensures correct stakeholder column selection through config
 # ========================================================================
 
 suppressPackageStartupMessages({
@@ -35,36 +33,47 @@ suppressPackageStartupMessages({
 })
 
 # ========================================================================
-# CONFIGURATION MANAGEMENT (Issue 1 Fix)
+# LOAD CENTRAL CONFIGURATION (CRITICAL FOR INTEGRATION)
 # ========================================================================
-# Try to load configuration file for consistent seed across pipeline
-if (file.exists("R/00_config.R")) {
-  source("R/00_config.R")
-  if (exists("PIPELINE_SEED")) {
-    set.seed(PIPELINE_SEED)
-    message(sprintf("✓ Using pipeline seed from config: %d", PIPELINE_SEED))
-  } else {
-    warning("Config file found but PIPELINE_SEED not defined, using default seed")
-    set.seed(1307)
+# Try multiple locations for the config file
+config_locations <- c("R/00_config.R", "00_config.R", "../00_config.R")
+config_loaded <- FALSE
+
+for (config_path in config_locations) {
+  if (file.exists(config_path)) {
+    source(config_path)
+    config_loaded <- TRUE
+    message(sprintf("✓ Loaded central configuration from: %s", config_path))
+    break
   }
-} else if (file.exists("00_config.R")) {
-  # Try current directory as fallback
-  source("00_config.R")
-  if (exists("PIPELINE_SEED")) {
-    set.seed(PIPELINE_SEED)
-    message(sprintf("✓ Using pipeline seed from local config: %d", PIPELINE_SEED))
-  } else {
-    set.seed(1307)
-  }
-} else {
-  warning("Config file not found, using default seed 1307")
-  set.seed(1307)
 }
 
+if (!config_loaded) {
+  stop("CRITICAL: Cannot find 00_config.R. This script requires central configuration.")
+}
+
+# Verify essential configuration objects exist
+if (!exists("PATHS")) {
+  stop("CRITICAL: PATHS object not found in configuration. Check 00_config.R")
+}
+if (!exists("COLUMN_MAP")) {
+  stop("CRITICAL: COLUMN_MAP object not found in configuration. Check 00_config.R")
+}
+if (!exists("find_column")) {
+  stop("CRITICAL: find_column function not found in configuration. Check 00_config.R")
+}
+if (!exists("PIPELINE_SEED")) {
+  warning("PIPELINE_SEED not found in configuration, using default seed 1307")
+  PIPELINE_SEED <- 1307
+}
+
+# Set seed from configuration
+set.seed(PIPELINE_SEED)
+message(sprintf("✓ Using pipeline seed from config: %d", PIPELINE_SEED))
 Sys.setenv(TZ = "UTC")
 
 # ========================================================================
-# OUTPUT DIRECTORY CREATION (Issue 3 Fix)
+# OUTPUT DIRECTORY CREATION
 # ========================================================================
 # Enhanced directory creation with verification
 output_dirs <- c("output", "output/tables", "figures")
@@ -89,46 +98,8 @@ for (dir in output_dirs) {
 }
 
 # ========================================================================
-# CENTRALIZED CONFIGURATION AND COLUMN MAPPING
+# HELPER FUNCTIONS FOR SAFE ANALYSIS
 # ========================================================================
-
-# Define column mapping to reduce redundancy
-COLUMN_MAP <- list(
-  # Role/stakeholder columns (CRITICAL: Use quota_target_category for N=1,307)
-  role = c("quota_target_category", "Final_Role_Category", "final_category_appendix_j", "stakeholder_category"),
-  
-  # Risk perception columns
-  tech_risk = c("technology_risk", "tech_risk", "Q3.6_1", "Q3.6_technology", "Q3_6_1", "technology_risk_perception"),
-  market_risk = c("market_risk", "Q3.6_2", "Q3.6_market", "Q3_6_2", "market_risk_perception"),
-  physical_risk = c("physical_risk", "Q3.6_physical", "Q3_6_4", "climate_physical_risk", "Q3.6_4"),
-  operational_risk = c("operational_risk", "Q3.6_operational", "Q3_6_5", "ops_risk", "Q3.6_5"),
-  regulatory_risk = c("regulatory_concern", "Q3.6_regulatory", "Q3_6_3", "regulatory_risk", "reg_concern", "Q3.6_3"),
-  
-  # Barrier columns
-  market_barrier = c("market_readiness_barrier", "Q3.11_1", "Q3.11_market", "market_barrier", "Q3_11_1"),
-  intl_scalability = c("international_scalability", "Q3.11_intl", "Q3.11_international", "intl_scalability", "global_scalability"),
-  
-  # Support mechanism columns
-  ecosystem_support = c("ecosystem_support", "Q3.11_ecosystem", "ecosystem", "Q3_11_ecosystem"),
-  collaboration = c("collaboration_pref", "Q3.11_collaboration", "collaboration", "Q3_11_collab"),
-  
-  # Geographic columns (Q2.2 REMOVED for privacy)
-  geography = c("hq_country", "region", "geography", "country"),
-  
-  # Investment/orientation columns
-  investment_likelihood = c("investment_likelihood", "Q3.7", "Q3_7", "likelihood_to_invest", "investment_intent"),
-  impact_orientation = c("Q3.3", "Q3_3", "impact_financial_orientation")
-)
-
-# Helper function to find first available column from candidates
-find_column <- function(df, candidates) {
-  available <- intersect(candidates, names(df))
-  if (length(available) > 0) {
-    return(list(column = available[1], found = TRUE))
-  } else {
-    return(list(column = NA, found = FALSE))
-  }
-}
 
 # Helper function for safe chi-square test with small cell check
 safe_chisq_test <- function(tbl, test_name = "Test") {
@@ -179,29 +150,40 @@ safe_get_percentage <- function(prop_table, row_name, col_name) {
 }
 
 # ========================================================================
-# DATA LOADING AND PREPARATION
+# DATA LOADING USING CENTRAL CONFIGURATION
 # ========================================================================
 
 message("=" + paste(rep("=", 69), collapse = ""))
-message("HYPOTHESIS TESTING PIPELINE - VERSION 3.0")
+message("HYPOTHESIS TESTING PIPELINE - VERSION 4.0")
 message("=" + paste(rep("=", 69), collapse = ""))
 
-# Load data
-paths <- c(
-  "data/climate_finance_survey_final_1307.csv",
-  "data/survey_responses_anonymized_preliminary.csv",
-  "data/survey_responses_anonymized_basic.csv"
-)
-
-path <- paths[file.exists(paths)][1]
-if (is.na(path)) {
-  stop("No input dataset found. Expected one of: ", paste(paths, collapse = ", "))
+# Use PATHS from central configuration
+available_paths <- names(PATHS)[sapply(names(PATHS), function(x) file.exists(PATHS[[x]]))]
+if (length(available_paths) == 0) {
+  stop("No input dataset found. Check PATHS configuration in 00_config.R")
 }
 
-df <- read.csv(path, stringsAsFactors = FALSE, check.names = FALSE)
-message(sprintf("✓ Loaded %d rows from %s", nrow(df), basename(path)))
+# Prioritize the final dataset
+if ("final" %in% available_paths) {
+  data_path <- PATHS[["final"]]
+  data_type <- "final"
+} else if ("preliminary" %in% available_paths) {
+  data_path <- PATHS[["preliminary"]]
+  data_type <- "preliminary"
+} else {
+  data_path <- PATHS[[available_paths[1]]]
+  data_type <- available_paths[1]
+}
 
-# CRITICAL: Find and use quota_target_category for analysis
+df <- read.csv(data_path, stringsAsFactors = FALSE, check.names = FALSE)
+message(sprintf("✓ Loaded %d rows from %s (%s dataset)", 
+                nrow(df), basename(data_path), data_type))
+
+# ========================================================================
+# STAKEHOLDER COLUMN SELECTION USING CENTRAL CONFIG
+# ========================================================================
+
+# Use the centralized column finding logic
 role_result <- find_column(df, COLUMN_MAP$role)
 if (!role_result$found) {
   stop("CRITICAL: No role category column found. Cannot proceed with analysis.")
@@ -593,7 +575,7 @@ if (ecosystem_result$found && collab_result$found) {
 # ========================================================================
 message("\n=== Testing H8: Geographic Regulatory Perception ===")
 
-# Find geographic variable (Q2.2 excluded for privacy)
+# Find geographic variable (Q2.2 excluded for privacy per config)
 geo_result <- find_column(df, COLUMN_MAP$geography)
 reg_result <- find_column(df, COLUMN_MAP$regulatory_risk)
 
@@ -876,11 +858,11 @@ if (length(tech_cols) >= 3) {
 }
 
 # ========================================================================
-# THREE-FACTOR CLIMATE RISK MODEL (Table 3 in manuscript) - ISSUE 2 FIX
+# THREE-FACTOR CLIMATE RISK MODEL (Table 3 in manuscript)
 # ========================================================================
 message("\n=== Three-Factor Climate Risk Model Analysis ===")
 
-# Identify available risk columns using column mapping
+# Identify available risk columns using centralized column mapping
 risk_cols_candidates <- list(
   physical = COLUMN_MAP$physical_risk,
   operational = COLUMN_MAP$operational_risk,
@@ -1126,7 +1108,7 @@ if (nrow(private_investors) > 30 && "impact_orientation" %in% names(private_inve
     if ("physical_risk_ord" %in% names(private_investors) && 
         sum(!is.na(private_investors$physical_risk_ord)) > 30) {
       
-      # Determine geographic variable (excluding Q2.2 for privacy)
+      # Determine geographic variable (excluding Q2.2 for privacy per config)
       geo_var <- if ("geography" %in% names(private_investors)) "geography" else 
                  if ("hq_country" %in% names(private_investors)) "hq_country" else
                  if ("region" %in% names(private_investors)) "region" else NULL
@@ -1420,6 +1402,7 @@ summary_report <- list(
   n_total = nrow(df),
   n_stakeholder_groups = length(unique(df[[ROLE_COLUMN]])),
   role_column_used = ROLE_COLUMN,
+  dataset_used = data_type,
   hypotheses_attempted = sum(data_status$Tested),
   hypotheses_with_real_data = sum(data_status$Data_Available),
   n_significant_raw = sum(data_status$Raw_P_Value < 0.05, na.rm = TRUE),
@@ -1435,8 +1418,9 @@ summary_report <- list(
     using_quota_column = ROLE_COLUMN == "quota_target_category",
     small_cell_protection = TRUE,
     multiple_testing_correction = TRUE,
-    privacy_protected = TRUE,  # Q2.2 excluded
-    configuration_based_seed = file.exists("R/00_config.R") || file.exists("00_config.R")
+    privacy_protected = TRUE,  # Q2.2 excluded per config
+    configuration_integrated = TRUE,
+    using_central_config = config_loaded
   )
 )
 
@@ -1455,27 +1439,30 @@ integrity_check <- list(
   all_analyses_use_real_data = TRUE,
   safe_table_access_implemented = TRUE,
   multiple_testing_correction_applied = TRUE,
-  privacy_protection = "Q2.2 excluded from geographic candidates",
-  configuration_management = if (exists("PIPELINE_SEED")) 
-    sprintf("Pipeline seed used: %d", PIPELINE_SEED) else "Default seed used",
-  output_directories_verified = all(dir.exists(output_dirs))
+  privacy_protection = "Q2.2 excluded from geographic candidates per config",
+  configuration_management = sprintf("Centralized config loaded from: %s", 
+                                   ifelse(config_loaded, config_path, "NOT LOADED")),
+  pipeline_seed_used = PIPELINE_SEED,
+  output_directories_verified = all(dir.exists(output_dirs)),
+  using_paths_from_config = TRUE,
+  using_column_map_from_config = TRUE
 )
 
 saveRDS(integrity_check, "output/data_integrity_check.rds")
 message("✓ Data integrity verified: NO synthetic/random data used")
 message("✓ Safe table access implemented for all contingency tables")
 message("✓ Multiple testing correction applied (Benjamini-Hochberg)")
-message("✓ Privacy protection: Q2.2 excluded from analysis")
-message("✓ Configuration management: Seed properly managed")
+message("✓ Privacy protection: Q2.2 excluded from analysis per config")
+message("✓ Configuration management: Fully integrated with central config")
 message("✓ Output directories: All verified and writable")
 
 # ========================================================================
 # FINAL OUTPUT MESSAGE
 # ========================================================================
 message("\n" + paste(rep("=", 70), collapse = ""))
-message("HYPOTHESIS TESTING COMPLETE - VERSION 3.0")
+message("HYPOTHESIS TESTING COMPLETE - VERSION 4.0")
 message(paste(rep("=", 70), collapse = ""))
-message(sprintf("✓ Analyzed %d observations", nrow(df)))
+message(sprintf("✓ Analyzed %d observations from %s dataset", nrow(df), data_type))
 message(sprintf("✓ Used role column: %s", ROLE_COLUMN))
 message(sprintf("✓ Tested %d/%d hypotheses", sum(data_status$Tested), 12))
 message(sprintf("✓ Data available for %d hypotheses", sum(data_status$Data_Available)))
@@ -1484,16 +1471,13 @@ message(sprintf("✓ Significant (raw p<0.05): %d hypotheses",
 message(sprintf("✓ Significant (adjusted p<0.05): %d hypotheses",
                 sum(data_status$Adjusted_P_Value < 0.05, na.rm = TRUE)))
 
-message("\nCRITICAL FIXES APPLIED IN VERSION 3.0:")
-message("✓ Configuration-based seed management (Issue 1)")
-message("✓ Robust PCA requirements checking (Issue 2)")
-message("✓ Enhanced output directory creation (Issue 3)")
-message("✓ NO synthetic or proxy data generation")
-message("✓ Using quota_target_category for N=1,307 sample")
-message("✓ Centralized column mapping (reduced redundancy)")
-message("✓ Small cell protection for chi-square tests")
-message("✓ Multiple testing correction (Benjamini-Hochberg)")
-message("✓ Privacy protection (Q2.2 excluded)")
+message("\nVERSION 4.0 IMPROVEMENTS:")
+message("✓ Full integration with central configuration (00_config.R)")
+message("✓ Uses PATHS object from config for data loading")
+message("✓ Uses centralized column mapping and helper functions")
+message("✓ Removed all redundant local definitions")
+message("✓ Ensures correct stakeholder column selection through config")
+message("✓ Maintains all data integrity protections from v3.0")
 
 message("\nAll results saved to output/ directory")
 

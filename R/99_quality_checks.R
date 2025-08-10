@@ -1,17 +1,18 @@
 #!/usr/bin/env Rscript
 # R/99_quality_checks.R - Comprehensive quality assurance checks
 # Purpose: Run comprehensive quality checks on pipeline outputs with enhanced diagnostics
-# Version: 2.1
+# Version: 2.2
 # Author: Pipeline QA System
 # 
 # ENHANCEMENTS:
-# - Added cli package for better formatted output
+# - Fixed main execution block to ensure script runs when called from pipeline
+# - Added command-line argument support for flexibility
+# - Enhanced cli package usage for better formatted output
 # - Created report_check function for consistent diagnostic reporting
 # - Enhanced all checks with detailed diagnostic information
 # - Fixed write_csv to include na = "" parameter
 # - Added comprehensive sample size and distribution checks
 # - Improved error handling and reporting throughout
-# - Fixed docstring syntax error (replaced Python-style with R comments)
 
 suppressPackageStartupMessages({
   library(tidyverse)
@@ -24,6 +25,76 @@ source("R/00_config.R")
 
 # Source Appendix J configuration for role column names
 source("R/appendix_j_config.R")
+
+# =============================================================================
+# COMMAND-LINE ARGUMENT PARSING
+# =============================================================================
+
+parse_arguments <- function() {
+  args <- commandArgs(trailingOnly = TRUE)
+  
+  # Default settings
+  settings <- list(
+    verbose = TRUE,
+    save_report = TRUE,
+    checksums = TRUE,
+    verification = TRUE,
+    role_check = TRUE,
+    help = FALSE
+  )
+  
+  # Parse arguments
+  for (arg in args) {
+    if (arg %in% c("--help", "-h")) {
+      settings$help <- TRUE
+    } else if (arg %in% c("--quiet", "-q")) {
+      settings$verbose <- FALSE
+    } else if (arg %in% c("--no-report")) {
+      settings$save_report <- FALSE
+    } else if (arg %in% c("--no-checksums")) {
+      settings$checksums <- FALSE
+    } else if (arg %in% c("--no-verification")) {
+      settings$verification <- FALSE
+    } else if (arg %in% c("--no-role-check")) {
+      settings$role_check <- FALSE
+    } else if (arg %in% c("--minimal", "-m")) {
+      # Minimal mode: just run checks, no extras
+      settings$checksums <- FALSE
+      settings$verification <- FALSE
+      settings$role_check <- FALSE
+    }
+  }
+  
+  return(settings)
+}
+
+# Show help message
+show_help <- function() {
+  cat("
+Quality Checks Script for Climate Finance Research Pipeline
+
+Usage: Rscript R/99_quality_checks.R [OPTIONS]
+
+Options:
+  --help, -h          Show this help message
+  --quiet, -q         Suppress verbose output
+  --no-report         Don't save quality report to file
+  --no-checksums      Skip checksum generation
+  --no-verification   Skip verification report generation
+  --no-role-check     Skip role column consistency check
+  --minimal, -m       Run minimal checks only (no extras)
+
+Examples:
+  Rscript R/99_quality_checks.R              # Run all checks with full output
+  Rscript R/99_quality_checks.R --quiet      # Run quietly
+  Rscript R/99_quality_checks.R --minimal    # Run minimal checks only
+
+Exit codes:
+  0 - All checks passed
+  1 - Some checks failed
+  2 - Critical error during execution
+")
+}
 
 # =============================================================================
 # ENHANCED REPORTING FUNCTION
@@ -730,6 +801,9 @@ run_quality_checks <- function(verbose = TRUE, save_report = TRUE) {
 # ENHANCED UTILITY FUNCTIONS
 # =============================================================================
 
+# Define null-coalescing operator if not already defined
+`%||%` <- function(a, b) if (is.null(a)) b else a
+
 # Generate recommendations based on failed checks
 generate_recommendations <- function(results, details) {
   recommendations <- c()
@@ -1085,30 +1159,95 @@ check_role_column_consistency <- function(verbose = TRUE) {
 }
 
 # =============================================================================
-# RUN IF CALLED DIRECTLY
+# MAIN EXECUTION FUNCTION
 # =============================================================================
 
-if (!interactive() && length(commandArgs(trailingOnly = TRUE)) == 0) {
-  # Script is being run directly
-  cli_h1("Running Pipeline Quality Assurance")
+main <- function() {
+  # Parse command-line arguments
+  settings <- parse_arguments()
   
-  results <- run_quality_checks(verbose = TRUE, save_report = TRUE)
-  
-  # Generate additional reports
-  cli_h2("Generating reproducibility artifacts")
-  generate_checksums(save_to_file = TRUE, verbose = TRUE)
-  generate_verification_report(save_to_file = TRUE, verbose = TRUE)
-  
-  # Run role column consistency check
-  cli_h2("Checking role column consistency")
-  role_consistency <- check_role_column_consistency(verbose = TRUE)
-  
-  # Final status message
-  if (results$overall_status == "PASSED") {
-    cli_alert_success("All quality checks passed successfully!")
+  # Show help if requested
+  if (settings$help) {
+    show_help()
     quit(save = "no", status = 0)
-  } else {
-    cli_alert_danger("Quality checks completed with issues. Review report for details.")
-    quit(save = "no", status = 1)
   }
+  
+  # Error handling wrapper
+  tryCatch({
+    # Run main quality checks
+    if (settings$verbose) {
+      cli_h1("Running Pipeline Quality Assurance")
+    }
+    
+    results <- run_quality_checks(
+      verbose = settings$verbose, 
+      save_report = settings$save_report
+    )
+    
+    # Generate checksums if requested
+    if (settings$checksums) {
+      if (settings$verbose) {
+        cli_h2("Generating reproducibility artifacts")
+      }
+      generate_checksums(save_to_file = TRUE, verbose = settings$verbose)
+    }
+    
+    # Generate verification report if requested
+    if (settings$verification) {
+      generate_verification_report(save_to_file = TRUE, verbose = settings$verbose)
+    }
+    
+    # Run role column consistency check if requested
+    if (settings$role_check) {
+      if (settings$verbose) {
+        cli_h2("Checking role column consistency")
+      }
+      role_consistency <- check_role_column_consistency(verbose = settings$verbose)
+    }
+    
+    # Final status message
+    if (settings$verbose) {
+      if (results$overall_status == "PASSED") {
+        cli_alert_success("All quality checks passed successfully!")
+      } else {
+        cli_alert_danger("Quality checks completed with issues. Review report for details.")
+      }
+    }
+    
+    # Exit with appropriate status code
+    exit_status <- if (results$overall_status == "PASSED") 0 else 1
+    quit(save = "no", status = exit_status)
+    
+  }, error = function(e) {
+    cli_alert_danger("Critical error during quality checks: {e$message}")
+    
+    # Save error state for debugging
+    error_state <- list(
+      error = e$message,
+      traceback = capture.output(traceback()),
+      timestamp = Sys.time()
+    )
+    
+    error_file <- paste0("output/qa_error_", 
+                        format(Sys.time(), "%Y%m%d_%H%M%S"), 
+                        ".rds")
+    saveRDS(error_state, error_file)
+    cli_alert_info("Error state saved to: {error_file}")
+    
+    quit(save = "no", status = 2)
+  })
+}
+
+# =============================================================================
+# EXECUTION ENTRY POINT - FIXED TO ENSURE SCRIPT RUNS
+# =============================================================================
+
+# This ensures the script runs when called via Rscript, source(), or system()
+# The script will execute unless it's being loaded in an interactive session
+if (!interactive()) {
+  # Run the main function when script is executed non-interactively
+  main()
+} else {
+  # In interactive mode, just define the functions but don't run
+  cli_alert_info("Quality check functions loaded. Run main() to execute checks.")
 }

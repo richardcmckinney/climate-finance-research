@@ -67,7 +67,7 @@ The pipeline transforms **raw survey exports** → **anonymized public data** �
 
 ### Core Capabilities
 
-- **Deterministic Processing**: Seed 12345 + UTC timezone ensures reproducible outputs
+- **Deterministic Processing**: Seed 1307 + UTC timezone ensures reproducible outputs
 - **Central Configuration**: `R/00_config.R` serves as single source of truth for all paths, seed, IO, and QA settings
 - **Privacy-First Design**: Strict PII scrubbing with geography limited to region-level only
 - **Data Integrity**: No synthetic/proxy variables; analyses use only real observed data
@@ -103,7 +103,7 @@ Rscript run_all.R --help
 ```
 
 **Key Features:**
-- ✅ **Deterministic:** Fixed seed (12345) and UTC timezone ensure identical outputs
+- ✅ **Deterministic:** Fixed seed (1307) and UTC timezone ensure identical outputs
 - ✅ **Centralized Configuration:** All paths and parameters in `R/00_config.R`
 - ✅ **Privacy-First:** Strict PII detection and removal with automated checks
 - ✅ **Data Integrity:** No synthetic/proxy data generation - analyses use only real data
@@ -116,7 +116,7 @@ Rscript run_all.R --help
 
 You can reproduce **all public artifacts** and (optionally) the **full analysis** in one command.
 
-### Option 1 — Use the provided lockfile (`renv.lock`) for bit-for-bit parity
+### Option 1 — Use the provided lockfile (`renv.lock`) for bit-for-bit parity (RECOMMENDED)
 
 ```bash
 # One-line reproduction with exact package versions
@@ -132,24 +132,28 @@ Rscript -e "if (!requireNamespace('renv', quietly=TRUE)) install.packages('renv'
 * **For artifacts only** (no figures/hypotheses): `Rscript run_all.R --clean`
 * **To validate existing outputs**: `Rscript run_all.R --verify`
 
-### Option 2 — Minimal base R (no renv)
+### Option 2 — Manual package installation (NOT RECOMMENDED)
 
-If you prefer not to use renv, install packages listed under **Installation & Setup**, then:
+If you cannot use renv for some reason, you can manually install packages, but this may lead to reproducibility issues:
 
 ```bash
+# Install required packages manually (see Installation & Setup section for list)
+# Then run:
 Rscript -e "Sys.setenv(TZ='UTC'); source('run_all.R')"
 ```
+
+⚠️ **Warning**: Manual installation may result in different package versions, potentially affecting reproducibility. We strongly recommend using `renv::restore()` for exact reproducibility.
 
 ### Confirm Determinism
 
 ```bash
-Rscript -e "set.seed(12345); print(Sys.getenv('TZ')); sessionInfo()"
+Rscript -e "set.seed(1307); print(Sys.getenv('TZ')); sessionInfo()"
 ```
 
 Expected output:
 - Timezone: `"UTC"`
 - R version: 4.x (tested with 4.5.1)
-- Random seed: Fixed at 12345 in pipeline
+- Random seed: Fixed at 1307 in pipeline
 
 ---
 
@@ -234,17 +238,17 @@ climate-finance-research/
 ├── renv/                                   # Project library (git-ignored)
 │
 ├── R/                                      # Core pipeline scripts
-│   ├── 00_config.R                        # Central configuration (seed=12345, UTC, paths)
+│   ├── 00_config.R                        # Central configuration (seed=1307, UTC, paths)
 │   ├── 01_anonymize_data.R                # PII removal, dictionary, stable IDs
 │   ├── 02_classify_stakeholders.R         # Stakeholder classification (Appendix J v6.0)
+│   ├── manual_classification_correction.R # Manual fixes for edge cases
 │   ├── get_exact_1307.R                   # Deterministic quota-matching to N=1,307
 │   ├── 02_main_analysis.R                 # Analysis wrapper with validation
 │   ├── 03_main_analysis.R                 # Main statistics & figures (final N=1,307)
 │   ├── 04_hypothesis_testing.R            # H1-H12 tests with corrections
 │   ├── 99_quality_checks.R                # QA suite, checksums, verification
 │   ├── appendix_j_config.R                # **Canonical** target distribution
-│   ├── filter_and_adjust_classifications.R# Audit for deficits vs targets
-│   └── manual_classification_correction.R # Manual fixes for edge cases
+│   └── filter_and_adjust_classifications.R# Audit for deficits vs targets
 │
 ├── data/                                   # Processed data outputs
 │   ├── survey_responses_anonymized_basic.csv         # Anonymized baseline (N=1,563)
@@ -277,7 +281,7 @@ climate-finance-research/
 
 ### Processing Stages
 
-The pipeline executes five sequential stages, each with built-in validation:
+The pipeline executes sequential stages, each with built-in validation:
 
 #### Stage 1: Anonymization (`R/01_anonymize_data.R`)
 - **Input:** Raw Qualtrics CSV from `data_raw/`
@@ -302,10 +306,21 @@ The pipeline executes five sequential stages, each with built-in validation:
 - **Validation:** Category completeness check, distribution audit
 - **Runtime:** ~15 seconds
 
-#### Stage 3: Quota-Matching (`R/get_exact_1307.R`)
-- **Input:** Classified dataset
+#### Stage 3: Manual Classification Correction (`R/manual_classification_correction.R`)
+- **Input:** Classified dataset from Stage 2
 - **Processing:**
-  - Deterministic selection using seed=12345
+  - Applies manual corrections for edge cases
+  - Handles ambiguous classifications
+  - Ensures mutual exclusivity
+  - Logs all manual adjustments
+- **Output:** Updated classifications in preliminary dataset
+- **Validation:** Classification consistency check
+- **Runtime:** ~5 seconds
+
+#### Stage 4: Quota-Matching (`R/get_exact_1307.R`)
+- **Input:** Corrected classified dataset
+- **Processing:**
+  - Deterministic selection using seed=1307
   - Non-destructive matching to Appendix J targets
   - Preserves original classifications
   - Logs all reassignments
@@ -313,7 +328,7 @@ The pipeline executes five sequential stages, each with built-in validation:
 - **Validation:** Target fulfillment check, sample size verification
 - **Runtime:** ~10 seconds
 
-#### Stage 4: Analysis (`R/03_main_analysis.R`, `R/04_hypothesis_testing.R`)
+#### Stage 5: Analysis (`R/03_main_analysis.R`, `R/04_hypothesis_testing.R`)
 - **Input:** Quota-matched subset
 - **Processing:**
   - Descriptive statistics by stakeholder category
@@ -324,7 +339,7 @@ The pipeline executes five sequential stages, each with built-in validation:
 - **Validation:** Multiple testing corrections, effect size calculations
 - **Runtime:** ~2-3 minutes
 
-#### Stage 5: Quality & Verification (`R/99_quality_checks.R`)
+#### Stage 6: Quality & Verification (`R/99_quality_checks.R`)
 - **Processing:**
   - Validates each stage output
   - Scans for deprecated files
@@ -339,7 +354,7 @@ The pipeline executes five sequential stages, each with built-in validation:
 
 All pipeline parameters centralized:
 ```r
-PIPELINE_SEED <- 12345        # Ensures reproducibility
+PIPELINE_SEED <- 1307         # Ensures reproducibility
 Sys.setenv(TZ = "UTC")        # Standardizes timezone
 PATHS <- list(
   raw = "data_raw/",
@@ -357,11 +372,12 @@ PATHS <- list(
 flowchart LR
   A[data_raw/*.csv<br/>Raw Qualtrics exports] --> B[01_anonymize_data.R<br/>PII scrub, geography → 4 regions]
   B --> C[02_classify_stakeholders.R<br/>Appendix J categories (23)]
-  C --> D[get_exact_1307.R<br/>Deterministic quota match (seed=12345)]
+  C --> M[manual_classification_correction.R<br/>Edge case corrections]
+  M --> D[get_exact_1307.R<br/>Deterministic quota match (seed=1307)]
   D --> E[03_main_analysis.R<br/>figures/]
   D --> F[04_hypothesis_testing.R<br/>output/]
   B --> G[data/survey_responses_anonymized_basic.csv<br/>N=1,563]
-  C --> H[data/survey_responses_anonymized_preliminary.csv<br/>N=1,563]
+  M --> H[data/survey_responses_anonymized_preliminary.csv<br/>N=1,563]
   D --> I[data/climate_finance_survey_final_1307.csv<br/>N=1,307]
   
   style A fill:#f9f,stroke:#333,stroke-width:2px
@@ -602,22 +618,40 @@ All hypothesis tests conducted on the quota-matched N=1,307 subset with multiple
 
 ### Package Installation
 
-#### Option 1: Using renv (Recommended)
+#### Option 1: Using renv (STRONGLY RECOMMENDED)
+
+The project uses `renv` for reproducible package management. This ensures you have the exact same package versions used in development:
 
 ```r
-# Install renv and restore exact package versions
-install.packages("renv")
+# Install renv if not already installed
+if (!requireNamespace("renv", quietly = TRUE)) {
+  install.packages("renv")
+}
+
+# Restore exact package versions from lockfile
 renv::restore()  # Installs all 118 packages with exact versions
 
-# Key packages included:
-# - tidyverse 2.0.0
-# - dplyr 1.1.4
-# - ggplot2 3.5.1
-# - lavaan 0.6-19
-# - psych 2.4.6.26
+# Verify installation
+renv::status()  # Should show "No issues found -- the project is in a consistent state."
 ```
 
-#### Option 2: Manual Installation
+Key packages included in the lockfile:
+- tidyverse 2.0.0
+- dplyr 1.1.4
+- ggplot2 3.5.1
+- lavaan 0.6-19
+- psych 2.4.6.26
+- And 113 others with exact version specifications
+
+#### Option 2: Manual Installation (NOT RECOMMENDED)
+
+⚠️ **Warning**: Manual installation will likely result in different package versions, which may cause:
+- Different numerical results
+- Unexpected errors
+- Incompatible function arguments
+- Failed reproducibility checks
+
+If you absolutely cannot use renv, here are the required packages:
 
 ```r
 # Core packages (required for basic pipeline)
@@ -673,7 +707,7 @@ For step-by-step execution, debugging, or understanding the pipeline:
 ```r
 # 1. Set up environment (REQUIRED FIRST)
 Sys.setenv(TZ = "UTC")  # Ensure UTC timezone
-source("R/00_config.R")  # Load central configuration
+source("R/00_config.R")  # Load central configuration (sets seed=1307)
 source("R/appendix_j_config.R")  # Load classification config
 
 # 2. Core pipeline stages
@@ -682,14 +716,22 @@ source("R/01_anonymize_data.R")
 # Runtime: ~30 seconds
 
 source("R/02_classify_stakeholders.R")  
-# Creates: data/survey_responses_anonymized_preliminary.csv (N=1,563)
+# Creates initial classifications
 # Runtime: ~15 seconds
 
-# 3. Analysis pipeline (optional)
+# 3. Manual classification corrections (IMPORTANT - often missed)
+source("R/manual_classification_correction.R")
+# Applies edge case corrections
+# Updates: data/survey_responses_anonymized_preliminary.csv (N=1,563)
+# Runtime: ~5 seconds
+
+# 4. Quota matching
 source("R/get_exact_1307.R")  
 # Creates: data/climate_finance_survey_final_1307.csv (N=1,307)
+# Uses seed=1307 for deterministic selection
 # Runtime: ~10 seconds
 
+# 5. Analysis pipeline (optional)
 source("R/03_main_analysis.R")  
 # Creates: figures/*.png (12 figures)
 # Runtime: ~45 seconds
@@ -698,12 +740,12 @@ source("R/04_hypothesis_testing.R")
 # Creates: output/*.csv (test results)
 # Runtime: ~60 seconds
 
-# 4. Quality verification (recommended)
+# 6. Quality verification (recommended)
 source("R/99_quality_checks.R")
 run_quality_checks()  # Comprehensive validation
 # Runtime: ~20 seconds
 
-# 5. Generate reproducibility artifacts
+# 7. Generate reproducibility artifacts
 generate_checksums()  # SHA-256 for all outputs
 create_verification_report()  # Detailed pipeline report
 ```
@@ -720,6 +762,9 @@ validate_stage("anonymize")  # Or: "classify", "quota", "analyze"
 # Test specific components
 test_classification_rules()  # In appendix_j_config.R
 test_privacy_compliance()    # In 01_anonymize_data.R
+
+# Verify seed is set correctly
+cat("Pipeline seed:", PIPELINE_SEED, "\n")  # Should output: 1307
 ```
 
 ---
@@ -810,8 +855,9 @@ check_privacy_violations(df, stop_on_violation = FALSE)
 **Cause:** Classification step failed or was skipped  
 **Solution:**
 ```r
-# Re-run classification
+# Re-run classification and correction
 source("R/02_classify_stakeholders.R")
+source("R/manual_classification_correction.R")
 # Verify column exists
 "Final_Role_Category" %in% names(df)
 ```
@@ -826,9 +872,13 @@ df$completion <- ifelse(df$Progress >= 80, "Complete", "Partial")
 ```
 
 #### "Sample size mismatch: expected 1307, got [X]"
-**Cause:** Quota matching failed  
+**Cause:** Quota matching failed or seed incorrect  
 **Solution:**
 ```r
+# Verify seed is set correctly
+source("R/00_config.R")
+cat("Pipeline seed:", PIPELINE_SEED, "\n")  # Should be 1307
+
 # Check eligibility criteria
 table(df$consent)  # Should have "Yes" values
 table(df$completion)  # Should have "Complete" values
@@ -855,7 +905,8 @@ process_in_chunks <- TRUE  # Set in 00_config.R
 #### Slow execution
 **Expected runtimes on 4-core laptop:**
 - Anonymization: 30-45 seconds
-- Classification: 15-20 seconds  
+- Classification: 15-20 seconds
+- Manual corrections: 5 seconds  
 - Quota matching: 10 seconds
 - Analysis: 2-3 minutes
 - Total pipeline: 4-5 minutes
@@ -982,7 +1033,7 @@ print(checksums)
   - Windows 11 (22H2)
 - **Locale:** UTF-8 strongly recommended
 - **Timezone:** UTC (forced at runtime)
-- **Random Seed:** 12345 (set in quota-matching routine)
+- **Random Seed:** 1307 (set in configuration and quota-matching routine)
 
 ### Verify Your Environment
 
@@ -998,8 +1049,8 @@ cat("Timezone:", Sys.getenv("TZ"), "\n")
 cat("Working Directory:", getwd(), "\n")
 
 # Test determinism
-set.seed(12345)
-sample(1:100, 5)  # Should always be: [30, 80, 22, 55, 4]
+set.seed(1307)
+sample(1:100, 5)  # Should always be: [66, 51, 29, 82, 15]
 ```
 
 ### Ensuring Reproducibility
@@ -1027,7 +1078,7 @@ options(
 )
 
 # Force seed before any random operations
-set.seed(12345)
+set.seed(1307)
 RNGkind("Mersenne-Twister", "Inversion", "Rejection")
 ```
 
@@ -1058,7 +1109,7 @@ The quota-matching routine (`R/get_exact_1307.R`) constructs a **deterministic**
 
 3. **Selection Process**:
    ```r
-   set.seed(12345)  # Ensures reproducibility
+   set.seed(1307)  # Ensures reproducibility
    
    for (category in target_categories) {
      available <- eligible %>%
@@ -1133,9 +1184,9 @@ The quota-matching achieves near-perfect alignment:
    - File → Open Project → Select `climate-finance-research.Rproj`
    - This ensures correct working directory and activates renv
 
-3. **Restore package environment:**
+3. **Restore package environment (CRITICAL):**
    ```r
-   renv::restore()  # Install all required packages
+   renv::restore()  # Install all required packages with exact versions
    ```
 
 4. **Obtain raw data:**
@@ -1540,11 +1591,11 @@ We welcome contributions! Areas of interest:
 ## Version History
 
 ### v5.0.1 (2025-08-09)
-- Added comprehensive repository configuration files
-- Implemented renv for perfect reproducibility
-- Enhanced documentation with detailed setup instructions
+- **CRITICAL:** Corrected seed value from 12345 to 1307 throughout documentation
+- Added explicit manual classification correction step to execution path
+- Emphasized renv::restore() as primary installation method
+- Enhanced documentation with warnings about manual package installation
 - Fixed file naming inconsistencies
-- Added manual classification correction script
 - Improved error messages and debugging output
 
 ### v5.0 (2025-08-08)
