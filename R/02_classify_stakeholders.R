@@ -7,23 +7,28 @@ if (!exists(".local", inherits = TRUE)) .local <- function(...) NULL
 # 02_classify_stakeholders.R
 # ============================================================================
 # Purpose: Produce stakeholder classifications per Appendix J methodology
-# Version: 6.0 - Comprehensive update with all identified issues fixed
+# Version: 7.0 - Added ANALYSIS_ROLE column for quota-aware downstream analysis
 # 
-# Key Improvements in v6.0:
-#   - FIXED: Classification logic ordering - specific rules before generic
-#   - FIXED: Column naming consistency (Final_Role_Category throughout)
-#   - FIXED: Added na = "" parameter to all write_csv calls
-#   - FIXED: Uses centralized helpers from 00_config.R (no duplication)
-#   - FIXED: Comprehensive join validation with detailed diagnostics
-#   - MAINTAINED: All original functionality and documentation
-#   - MAINTAINED: Explicit rlang namespace loading for better reliability
-#   - MAINTAINED: Critical data joining bug fix with actual column name tracking
-#   - MAINTAINED: STRICT privacy violation checking (stop_on_violation = TRUE)
-#   - MAINTAINED: Robust case_when classification logic
+# Key Improvements in v7.0:
+#   - NEW: Added ANALYSIS_ROLE column that prefers quota_target_category if present
+#   - NEW: Preserves existing quota_target_category column (never overwrites)
+#   - NEW: Provides consistent interface for downstream analysis scripts
+#   - MAINTAINED: All v6.0 fixes and improvements
+#   - MAINTAINED: Classification logic ordering - specific rules before generic
+#   - MAINTAINED: Column naming consistency (Final_Role_Category throughout)
+#   - MAINTAINED: All write_csv calls include na = "" parameter
+#   - MAINTAINED: Uses centralized helpers from 00_config.R
+#   - MAINTAINED: Comprehensive join validation with detailed diagnostics
+#   - MAINTAINED: STRICT privacy violation checking
+#
+# Important Note on quota_target_category:
+#   - This column is created by get_exact_1307.R on the final subset only
+#   - This script NEVER creates or overwrites quota_target_category
+#   - ANALYSIS_ROLE provides a consistent interface for downstream scripts
 #
 # Outputs:
 #   - docs/appendix_j_classification_template.csv
-#   - data/survey_responses_anonymized_preliminary.csv
+#   - data/survey_responses_anonymized_preliminary.csv (with ANALYSIS_ROLE)
 #   - output/classification_audit.csv
 # ============================================================================
 
@@ -76,6 +81,14 @@ if (!file.exists(in_basic)) {
 # Load anonymized survey data
 df <- suppressMessages(read_csv(in_basic, show_col_types = FALSE))
 message("✓ Loaded ", nrow(df), " records from: ", basename(in_basic))
+
+# Check for existing quota_target_category column
+has_quota_column <- "quota_target_category" %in% names(df)
+if (has_quota_column) {
+  message("ℹ Detected existing quota_target_category column - will be preserved")
+  quota_count <- sum(!is.na(df$quota_target_category))
+  message("  ", quota_count, " records have quota_target_category values")
+}
 
 # --------------------------------------------------------------------
 # 5. COLUMN IDENTIFICATION
@@ -440,7 +453,7 @@ classification_df <- classification_df %>%
   mutate(
     Classification_Stage = "preliminary",
     Classification_Date = Sys.Date(),
-    Classification_Version = "6.0",
+    Classification_Version = "7.0",
     Classification_Method = case_when(
       !is.na(Role_Other_Text) & nchar(Role_Other_Text) > 0 ~ "other_text",
       !is.na(Role_Raw) ~ "predefined",
@@ -537,7 +550,64 @@ if (join_na_count > 0) {
 }
 
 # --------------------------------------------------------------------
-# 11. PRIVACY VALIDATION
+# 11. CREATE ANALYSIS ROLE COLUMN
+# --------------------------------------------------------------------
+message("\n=== CREATING ANALYSIS ROLE COLUMN ===")
+
+# CRITICAL v7.0 ADDITION: Create ANALYSIS_ROLE that prefers quota_target_category
+# This provides a consistent interface for downstream scripts
+# quota_target_category is created by get_exact_1307.R on the final subset only
+
+# DO NOT CREATE OR OVERWRITE quota_target_category HERE
+# Only use it if it already exists in the data
+
+if ("quota_target_category" %in% names(df_prelim)) {
+  # Use existing quota_target_category as primary source
+  df_prelim <- df_prelim %>%
+    mutate(
+      ANALYSIS_ROLE = coalesce(quota_target_category, Final_Role_Category),
+      ANALYSIS_ROLE_SOURCE = case_when(
+        !is.na(quota_target_category) ~ "quota_matched",
+        !is.na(Final_Role_Category) ~ "harmonized",
+        TRUE ~ "unclassified"
+      )
+    )
+  
+  # Report statistics
+  quota_used <- sum(df_prelim$ANALYSIS_ROLE_SOURCE == "quota_matched")
+  harmonized_used <- sum(df_prelim$ANALYSIS_ROLE_SOURCE == "harmonized")
+  
+  message("✓ ANALYSIS_ROLE created:")
+  message("  - ", quota_used, " records using quota_target_category")
+  message("  - ", harmonized_used, " records using Final_Role_Category")
+  message("  - Column preference: quota_target_category > Final_Role_Category")
+  
+} else {
+  # No quota column exists - use Final_Role_Category for all records
+  df_prelim <- df_prelim %>%
+    mutate(
+      ANALYSIS_ROLE = Final_Role_Category,
+      ANALYSIS_ROLE_SOURCE = case_when(
+        !is.na(Final_Role_Category) ~ "harmonized",
+        TRUE ~ "unclassified"
+      )
+    )
+  
+  message("✓ ANALYSIS_ROLE created using Final_Role_Category")
+  message("  - No quota_target_category column found")
+  message("  - All ", nrow(df_prelim), " records use Final_Role_Category")
+}
+
+# Validate ANALYSIS_ROLE completeness
+analysis_na_count <- sum(is.na(df_prelim$ANALYSIS_ROLE))
+if (analysis_na_count > 0) {
+  warning("WARNING: ", analysis_na_count, " records have NA in ANALYSIS_ROLE!")
+} else {
+  message("✓ All records have valid ANALYSIS_ROLE values")
+}
+
+# --------------------------------------------------------------------
+# 12. PRIVACY VALIDATION
 # --------------------------------------------------------------------
 message("\n=== PRIVACY VALIDATION ===")
 message("Running STRICT privacy check...")
@@ -546,17 +616,22 @@ message("Running STRICT privacy check...")
 check_privacy_violations(df_prelim, stop_on_violation = TRUE)
 message("✓ Privacy check PASSED - No PII detected")
 
-# Save preliminary classified data
+# Save preliminary classified data with ANALYSIS_ROLE
 # FIX: Added na = "" parameter
 write_csv(df_prelim, out_prelim, na = "")
 message("✓ Preliminary data saved: ", normalizePath(out_prelim))
+message("  - Contains Final_Role_Category (harmonized)")
+if (has_quota_column) {
+  message("  - Preserves original quota_target_category")
+}
+message("  - Contains ANALYSIS_ROLE for downstream scripts")
 
 # --------------------------------------------------------------------
-# 12. GENERATE SUMMARY STATISTICS
+# 13. GENERATE SUMMARY STATISTICS
 # --------------------------------------------------------------------
 message("\n=== CLASSIFICATION SUMMARY ===")
 
-# Calculate distribution statistics
+# Calculate distribution statistics for Final_Role_Category
 summary_stats <- classification_df %>%
   count(Final_Role_Category, sort = TRUE) %>%
   mutate(
@@ -564,10 +639,23 @@ summary_stats <- classification_df %>%
   )
 
 # Display summary
+message("\nFinal_Role_Category distribution:")
 print(summary_stats, n = 30)
 
+# If ANALYSIS_ROLE differs from Final_Role_Category, show that distribution too
+if ("quota_target_category" %in% names(df_prelim)) {
+  analysis_summary <- df_prelim %>%
+    count(ANALYSIS_ROLE, ANALYSIS_ROLE_SOURCE, sort = TRUE) %>%
+    mutate(
+      percentage = round(n / sum(n) * 100, 1)
+    )
+  
+  message("\nANALYSIS_ROLE distribution (for downstream analysis):")
+  print(analysis_summary, n = 30)
+}
+
 # --------------------------------------------------------------------
-# 13. CREATE AUDIT LOG
+# 14. CREATE AUDIT LOG
 # --------------------------------------------------------------------
 message("\n=== CREATING AUDIT LOG ===")
 
@@ -584,7 +672,7 @@ audit_log <- summary_stats %>%
     Needs_Harmonization = sum(classification_df$needs_harmonization, na.rm = TRUE),
     Direct_Classification = sum(!classification_df$needs_harmonization, na.rm = TRUE),
     Pipeline_Stage = "Classification",
-    Script_Version = "6.0",
+    Script_Version = "7.0",
     Classification_Method = "case_when_ordered",
     Privacy_Check = "STRICT",
     Source_ID_Column = respondent_id_column,
@@ -592,7 +680,10 @@ audit_log <- summary_stats %>%
       round((nrow(df_prelim) - join_na_count) / nrow(df_prelim) * 100, 2), 
       "%"
     ),
-    Missing_Classifications = join_na_count
+    Missing_Classifications = join_na_count,
+    Has_Quota_Column = has_quota_column,
+    Analysis_Role_Created = TRUE,
+    Analysis_Role_NA_Count = analysis_na_count
   )
 
 # FIX: Added na = "" parameter
@@ -600,7 +691,7 @@ write_csv(audit_log, out_audit, na = "")
 message("✓ Audit log saved: ", normalizePath(out_audit))
 
 # --------------------------------------------------------------------
-# 14. FINAL STATISTICS AND VERIFICATION
+# 15. FINAL STATISTICS AND VERIFICATION
 # --------------------------------------------------------------------
 message("\n=== HARMONIZATION STATISTICS ===")
 message("Total responses: ", nrow(classification_df))
@@ -645,8 +736,18 @@ message("✓ Source ID column: '", respondent_id_column, "'")
 message("✓ Join success rate: ", 
         round((nrow(df_prelim) - join_na_count) / nrow(df_prelim) * 100, 2), "%")
 
+# v7.0 specific verifications
+message("\n=== VERSION 7.0 ADDITIONS ===")
+message("✓ ANALYSIS_ROLE column created for downstream scripts")
+message("✓ Preserves existing quota_target_category (never overwrites)")
+message("✓ ANALYSIS_ROLE prefers quota_target_category when present")
+message("✓ ANALYSIS_ROLE_SOURCE tracks data provenance")
+if (has_quota_column) {
+  message("✓ Successfully preserved ", quota_count, " quota-matched records")
+}
+
 message("\n" %.% rep("=", 60))
-message("✓ CLASSIFICATION COMPLETE - Version 6.0")
-message("  All identified issues fixed and verified")
-message("  Full functionality preserved from v5.0")
+message("✓ CLASSIFICATION COMPLETE - Version 7.0")
+message("  ANALYSIS_ROLE provides consistent interface for downstream")
+message("  All functionality from v6.0 preserved")
 message(rep("=", 60))

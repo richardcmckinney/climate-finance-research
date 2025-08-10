@@ -2,9 +2,10 @@
 # get_exact_1307.R — Non-destructive Appendix J quota-matching (publication grade)
 # Purpose: Generate exactly N=1,307 responses matching Appendix J distribution
 #          WITHOUT modifying original classifications (preserves ground truth)
+#          WITH deterministic reproducibility and complete audit manifests
 # Author: Richard McKinney
 # Date: 2025-08-09
-# Version: 4.2 (Fixed deficit-filling logic, seed consistency, strict validation)
+# Version: 5.0 (Incorporates feedback: deterministic manifests, single seed, strict validation)
 
 # ========================= INITIALIZATION =========================
 # Safety for Rscript/S4 compatibility (MUST BE FIRST)
@@ -23,7 +24,7 @@ suppressPackageStartupMessages({
 })
 
 # Create necessary directories
-for (dir in c("data", "output", "logs", "docs")) {
+for (dir in c("data", "output", "logs", "docs", "manifests")) {
   dir.create(dir, recursive = TRUE, showWarnings = FALSE)
 }
 
@@ -79,7 +80,7 @@ if (!appendix_j_loaded) {
 target <- get_appendix_j_target()
 
 # ========================= SET DETERMINISTIC ENVIRONMENT =========================
-# FIX #2: Use centralized seed from config, not hardcoded
+# Use centralized seed from config for entire pipeline - NO ad hoc seeds
 if (exists("PIPELINE_SEED")) {
   set.seed(PIPELINE_SEED)  # From 00_config.R
   cat("Random seed set to", PIPELINE_SEED, "from centralized config\n")
@@ -91,6 +92,9 @@ Sys.setenv(TZ = "UTC")
 options(stringsAsFactors = FALSE, scipen = 999)
 
 # ========================= VALIDATE TARGET CONFIGURATION =========================
+# Validate target using centralized function
+validate_appendix_j_target(target)
+
 # Hard assertion - no runtime rebalancing allowed
 target_sum <- sum(target$Target)
 if (target_sum != APPENDIX_J_CONFIG$target_n) {
@@ -104,6 +108,11 @@ if (target_sum != APPENDIX_J_CONFIG$target_n) {
 }
 
 # ========================= CONFIGURATION =========================
+# Create manifests directory if not exists
+if (exists("PATHS") && !is.null(PATHS$manifests)) {
+  dir.create(PATHS$manifests, showWarnings = FALSE, recursive = TRUE)
+}
+
 # Use centralized PATHS configuration instead of hardcoded paths
 config <- list(
   # Input/Output paths from centralized config
@@ -113,11 +122,18 @@ config <- list(
   outfile_verify = PATHS$verification,
   outfile_log    = PATHS$reassignment_log,
   outfile_stats  = PATHS$quota_stats,
-  # FIX: Standardize on quality_assurance_report naming
+  # Standardize on quality_assurance_report naming
   outfile_quality = if (exists("PATHS") && !is.null(PATHS$quality_assurance_report)) {
     PATHS$quality_assurance_report
   } else {
     "output/quality_assurance_report.csv"  # Fallback to standardized name
+  },
+  
+  # Manifest outputs (NEW - for audit trail)
+  manifest_dir = if (exists("PATHS") && !is.null(PATHS$manifests)) {
+    PATHS$manifests
+  } else {
+    "manifests"
   },
   
   # Import from centralized config
@@ -127,7 +143,7 @@ config <- list(
   
   # Processing parameters
   verbose = TRUE,
-  preserve_original = TRUE,  # NEW: Always preserve original classifications
+  preserve_original = TRUE,  # Always preserve original classifications
   max_donor_contribution = 0.3,  # Never take more than 30% from one donor category
   log_file = paste0("logs/get_exact_1307_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".log")
 )
@@ -175,7 +191,7 @@ if (config$verbose) {
   log_msg <- function(...) invisible(NULL)
 }
 
-log_msg("Starting get_exact_1307.R (v4.2 - Fixed critical issues)")
+log_msg("Starting get_exact_1307.R (v5.0 - Deterministic with manifests)")
 log_msg("R version: ", R.version.string)
 log_msg("Configuration:")
 log_msg("  Central config loaded: ", config_loaded)
@@ -185,7 +201,7 @@ log_msg("  Min Progress: ", config$min_progress)
 log_msg("  Preserve original: ", config$preserve_original)
 log_msg("  Random seed: ", if(exists("PIPELINE_SEED")) PIPELINE_SEED else 1307)
 log_msg("  Working directory: ", getwd())
-log_msg("  Quality assurance report path: ", config$outfile_quality)
+log_msg("  Manifest directory: ", config$manifest_dir)
 
 # ========================= HELPER FUNCTIONS =========================
 # Optimized helper for safe column access
@@ -326,14 +342,11 @@ log_msg("\n=== ROLE COLUMN DETECTION ===")
 role_col <- find_role_column(df)
 log_msg("Using role column: ", role_col)
 
-# CRITICAL: Preserve original classification
-# This is the key fix - we create a new column for quota-matched assignments
-# while preserving the original ground truth
+# Preserve original classification
 original_role_col <- paste0(role_col, "_Original")
 df[[original_role_col]] <- df[[role_col]]
 log_msg("Preserved original classifications in: ", original_role_col)
 
-# FIX #3: Use consistent column naming
 # Create new column for quota-matched assignments with consistent name
 quota_role_col <- "quota_target_category"  # Standardized name
 df[[quota_role_col]] <- df[[role_col]]  # Initialize with original values
@@ -551,7 +564,7 @@ if (total_deficit > 0 && nrow(remaining) > 0) {
                    i, top_donors$Category[i], top_donors$Can_Donate[i]))
   }
   
-  # FIX #1: CRITICAL deficit filling logic bug fix
+  # Deficit filling logic with proper tracking
   for (i in seq_len(nrow(need_tbl))) {
     if (nrow(remaining) == 0) break
     
@@ -570,7 +583,7 @@ if (total_deficit > 0 && nrow(remaining) > 0) {
     
     filled <- 0
     for (j in seq_len(nrow(current_donor_pool))) {
-      # CRITICAL FIX: Check if deficit is already filled
+      # Check if deficit is already filled
       if (deficit_needed <= 0) {
         log_msg("  SUCCESS: Deficit filled for ", cat_i, " (", filled, " reassignments)")
         break
@@ -597,7 +610,7 @@ if (total_deficit > 0 && nrow(remaining) > 0) {
         # Take the required number
         move <- cand[seq_len(n_to_take), , drop = FALSE]
         
-        # CRITICAL: Update ONLY the quota column, preserve original
+        # Update ONLY the quota column, preserve original
         move[[quota_role_col]] <- cat_i
         
         # Record reassignment with both original and new categories
@@ -617,7 +630,7 @@ if (total_deficit > 0 && nrow(remaining) > 0) {
         remaining <- anti_join(remaining, move[, "ResponseId", drop = FALSE], by = "ResponseId")
         final <- bind_rows(final, move)
         
-        # CRITICAL FIX: Update deficit immediately
+        # Update deficit immediately
         deficit_needed <- deficit_needed - n_to_take
         filled <- filled + n_to_take
         
@@ -639,7 +652,7 @@ if (total_deficit > 0 && nrow(remaining) > 0) {
 # ========================= PREPARE FINAL OUTPUT =========================
 log_msg("\n=== PREPARING FINAL OUTPUT ===")
 
-# FIX #3: Ensure consistent column naming throughout
+# Ensure consistent column naming throughout
 # Rename columns for clarity while preserving both original and quota-matched
 final <- final %>%
   rename(
@@ -655,7 +668,7 @@ final <- final %>%
 # Add metadata columns
 final <- final %>%
   mutate(
-    Quota_Match_Version = "4.2",
+    Quota_Match_Version = "5.0",
     Quota_Match_Date = Sys.Date(),
     Was_Reassigned = ResponseId %in% reassign_log$ResponseId
   )
@@ -666,7 +679,7 @@ final <- final %>% arrange(ResponseId)
 # ========================= FINAL VERIFICATION =========================
 log_msg("\n=== FINAL VERIFICATION ===")
 
-# FIX #4: Add strict validation for exact count
+# Strict validation for exact count
 final_count <- nrow(final)
 if (final_count != config$target_n) {
   log_msg("\n✗ CRITICAL ERROR: Final count is ", final_count, ", NOT ", config$target_n)
@@ -723,6 +736,16 @@ verify_tbl <- full_join(final_dist, target, by = "Category") %>%
   ) %>%
   arrange(desc(abs(Difference)))
 
+# Verify category counts match exactly
+for (i in seq_len(nrow(verify_tbl))) {
+  if (verify_tbl$Difference[i] != 0) {
+    stop(sprintf(
+      "Category count mismatch for '%s': got %d, expected %d",
+      verify_tbl$Category[i], verify_tbl$Final[i], verify_tbl$Target[i]
+    ))
+  }
+}
+
 # Enhanced verification output
 log_msg("\nCategory distribution (largest differences first):")
 log_msg(sprintf("%-45s %6s %6s %6s %7s %8s", 
@@ -778,6 +801,7 @@ tryCatch({
   log_msg("✓ Final dataset → ", normalizePath(config$outfile_final, mustWork = FALSE))
 }, error = function(e) {
   log_msg("ERROR saving final dataset: ", e$message)
+  stop("Failed to save final dataset")
 })
 
 tryCatch({
@@ -787,22 +811,85 @@ tryCatch({
   log_msg("ERROR saving verification: ", e$message)
 })
 
+# ========================= WRITE MANIFEST FILES (NEW) =========================
+log_msg("\n=== WRITING MANIFEST FILES ===")
+
+# 1. ID Manifest - all ResponseIds with categories
+id_manifest <- final %>%
+  select(ResponseId, Original_Classification, !!quota_role_col, Was_Reassigned) %>%
+  arrange(ResponseId)
+
+tryCatch({
+  manifest_path <- file.path(config$manifest_dir, "ids_manifest.csv")
+  write.csv(id_manifest, manifest_path, row.names = FALSE)
+  log_msg("✓ ID manifest → ", manifest_path)
+}, error = function(e) {
+  log_msg("ERROR saving ID manifest: ", e$message)
+})
+
+# 2. Category counts manifest
+category_counts <- verify_tbl %>%
+  select(Category, Target, Final, Original, Difference, Match) %>%
+  arrange(Category)
+
+tryCatch({
+  counts_path <- file.path(config$manifest_dir, "category_counts.csv")
+  write.csv(category_counts, counts_path, row.names = FALSE)
+  log_msg("✓ Category counts → ", counts_path)
+}, error = function(e) {
+  log_msg("ERROR saving category counts: ", e$message)
+})
+
+# 3. Reassignment log (if any reassignments occurred)
 if (nrow(reassign_log) > 0) {
   # Add enhanced information to reassignment log
   reassign_log <- reassign_log %>%
     mutate(
       Preserved_Original = TRUE,
-      Reassignment_Method = "Non-destructive quota matching v4.2"
+      Reassignment_Method = "Non-destructive quota matching v5.0",
+      Pipeline_Seed = if(exists("PIPELINE_SEED")) PIPELINE_SEED else 1307,
+      Timestamp = Sys.time()
     )
   
   tryCatch({
+    # Save to both configured location and manifest directory
     write.csv(reassign_log, config$outfile_log, row.names = FALSE)
     log_msg("✓ Reassignment log → ", normalizePath(config$outfile_log, mustWork = FALSE))
+    
+    manifest_reassign_path <- file.path(config$manifest_dir, "reassignment_log.csv")
+    write.csv(reassign_log, manifest_reassign_path, row.names = FALSE)
+    log_msg("✓ Reassignment manifest → ", manifest_reassign_path)
   }, error = function(e) {
     log_msg("ERROR saving reassignment log: ", e$message)
   })
 }
 
+# 4. Summary statistics manifest
+summary_manifest <- list(
+  Pipeline_Version = "5.0",
+  Execution_Date = Sys.Date(),
+  Execution_Time = format(Sys.time(), "%Y-%m-%d %H:%M:%S %Z"),
+  Random_Seed = if(exists("PIPELINE_SEED")) PIPELINE_SEED else 1307,
+  Input_File = basename(infile),
+  Initial_Count = initial_count,
+  Eligible_Count = nrow(df),
+  Final_Count = final_count,
+  Target_Count = config$target_n,
+  Categories_Count = n_categories,
+  Categories_Matched = n_matched,
+  Reassignments_Count = nrow(reassign_log),
+  Exact_Match = (final_count == config$target_n)
+)
+
+tryCatch({
+  summary_path <- file.path(config$manifest_dir, "selection_summary.csv")
+  write.csv(as.data.frame(summary_manifest), summary_path, row.names = FALSE)
+  log_msg("✓ Summary manifest → ", summary_path)
+}, error = function(e) {
+  log_msg("ERROR saving summary manifest: ", e$message)
+})
+
+# Save first pass statistics
 tryCatch({
   write.csv(first_pass_stats, config$outfile_stats, row.names = FALSE)
   log_msg("✓ Statistics → ", normalizePath(config$outfile_stats, mustWork = FALSE))
@@ -935,6 +1022,7 @@ log_msg("After filtering: ", nrow(df))
 log_msg("Final dataset: ", nrow(final))
 log_msg("Reassignments: ", nrow(reassign_log))
 log_msg("Preservation method: Non-destructive (dual-column)")
+log_msg("Manifest directory: ", config$manifest_dir)
 log_msg("Quality assurance report: ", config$outfile_quality)
 
 # Calculate runtime
@@ -948,7 +1036,9 @@ log_msg("Runtime: ", round(runtime, 2), " seconds")
 log_msg("✓ Non-destructive quota matching completed successfully")
 log_msg("✓ Ground truth preserved in 'Original_Classification' column")
 log_msg("✓ Quota-matched assignments in '", quota_role_col, "' column")
-log_msg("✓ Quality assurance report saved to standardized path")
+log_msg("✓ Deterministic process with single seed (", 
+        if(exists("PIPELINE_SEED")) PIPELINE_SEED else 1307, ")")
+log_msg("✓ Complete audit trail in manifest directory")
 log_msg("✓ All outputs saved to centralized paths")
 log_msg("✓ Strict validation ensures exactly ", config$target_n, " responses")
 log_msg("Log saved to: ", config$log_file)
@@ -963,5 +1053,10 @@ invisible(list(
   config = config,
   appendix_j_config = APPENDIX_J_CONFIG,
   preserved_original = TRUE,
-  runtime = runtime
+  runtime = runtime,
+  manifests = list(
+    ids = id_manifest,
+    counts = category_counts,
+    summary = summary_manifest
+  )
 ))

@@ -1,10 +1,11 @@
 # R/00_config.R - Central configuration for all paths and standards
 # This file must be sourced by all other scripts
-# Version: 4.0
+# Version: 5.0
 # Date: 2025-08-09
 # 
 # IMPORTANT: This is a pure configuration file with NO external dependencies.
 # All functions requiring packages should be implemented in their respective modules.
+# This is the SINGLE SOURCE OF TRUTH for all pipeline configuration.
 
 # =============================================================================
 # ENVIRONMENT SETUP (Set deterministic behavior)
@@ -13,21 +14,22 @@ options(stringsAsFactors = FALSE)
 Sys.setenv(TZ = "UTC")
 
 # PIPELINE CONFIGURATION - Single source of truth for randomization
-PIPELINE_SEED <- 1307  # Standardized across entire pipeline
-set.seed(PIPELINE_SEED)  # Apply immediately
+PIPELINE_SEED <- 1307  # Standardized across entire pipeline - DO NOT CHANGE
+set.seed(PIPELINE_SEED)  # Apply immediately for deterministic behavior
 # Export for other scripts
 if (!exists(".PIPELINE_SEED", envir = .GlobalEnv)) {
   assign(".PIPELINE_SEED", PIPELINE_SEED, envir = .GlobalEnv)
 }
 
 # =============================================================================
-# PATH CONFIGURATION (Single source of truth)
+# PATH CONFIGURATION (Single source of truth - NO shadow configs allowed)
 # =============================================================================
 
 # Define canonical paths for all pipeline stages
 PATHS <- list(
   # Stage 1: Anonymization outputs
-  basic_anon = "data/survey_responses_anonymized_basic.csv",
+  raw = "data/survey_responses_anonymized_basic.csv",  # Primary input after anonymization
+  basic_anon = "data/survey_responses_anonymized_basic.csv",  # Alias for compatibility
   dictionary = "data/data_dictionary.csv",
   
   # Stage 2: Classification outputs  
@@ -42,6 +44,13 @@ PATHS <- list(
   verification = "output/final_distribution_verification.csv",
   quota_stats = "output/quota_matching_statistics.csv",
   
+  # Manifest outputs for reproducibility
+  manifests = "output/manifests",
+  ids_manifest = "output/manifests/final_1307_ids.csv",
+  category_counts = "output/manifests/final_1307_category_counts.csv",
+  quota_reassignment_log = "output/manifests/quota_reassignment_log.csv",
+  repro_manifest = "output/manifests/repro_manifest.csv",
+  
   # Stage 4: Analysis outputs
   hypothesis_summary = "output/hypothesis_testing_summary.csv",
   three_factor_model = "output/tables/three_factor_summary.csv",
@@ -49,11 +58,26 @@ PATHS <- list(
   barrier_analysis = "output/barrier_presence_by_stakeholder.csv",
   geographic_dist = "output/geographic_distribution_final.csv",
   
+  # Factor analysis outputs
+  alpha = "output/alpha_risk_items.csv",
+  efa = "output/efa_results.csv",
+  anova = "output/anova_tests.csv",
+  correlations = "output/correlations.csv",
+  proportion_cis = "output/proportion_wilson_cis.csv",
+  cfa = "output/cfa_fit_indices.csv",
+  cfa_train_rds = "output/cfa_fit_train.rds",
+  cfa_test_rds = "output/cfa_fit_test.rds",
+  
+  # Summary outputs
+  region_summary = "output/region_summary_final_1307.csv",
+  headline_barriers_by_role = "output/headline_barriers_by_role.csv",
+  screening_counts = "output/screening_counts.csv",
+  
   # Verification outputs
   checksums = "docs/checksums.txt",
   verification_report = "docs/verification_report.md",
   error_log = "docs/error_log.txt",
-  quality_assurance = "output/quality_assurance_report.csv"  # Single quality report path
+  quality_assurance = "output/quality_assurance_report.csv"
 )
 
 # Define deprecated paths that should NEVER be used
@@ -69,7 +93,7 @@ DEPRECATED_PATHS <- c(
 )
 
 # =============================================================================
-# COLUMN NAME STANDARDS
+# COLUMN NAME STANDARDS AND MAPPING
 # =============================================================================
 
 # Define canonical column names used throughout pipeline
@@ -106,6 +130,75 @@ STANDARD_COLUMNS <- list(
   classification_stage = "Classification_Stage",
   classification_version = "Classification_Version",
   classification_date = "Classification_Date"
+)
+
+# =============================================================================
+# RISK ITEM COLUMN MAPPING (for EFA/CFA analysis)
+# =============================================================================
+# Maps factor names to actual Qualtrics survey column names
+# These are the exact column names from the survey for risk perception items
+COLUMN_MAP <- list(
+  # Physical risks (climate-related physical impacts)
+  Physical = "Q3.6_1",          # Physical climate risks
+  
+  # Operational risks (business operations disruption)
+  Operational = "Q3.6_2",       # Operational/business continuity risks
+  
+  # Policy risks (policy uncertainty and changes)
+  Policy = "Q3.6_3",            # Policy and political risks
+  
+  # Regulatory risks (regulatory compliance and changes)
+  Regulatory = "Q3.6_4",        # Regulatory and compliance risks
+  
+  # Market risks (market dynamics and demand shifts)
+  Market = "Q3.6_5",            # Market and demand risks
+  
+  # Financial risks (financial performance and access)
+  Financial = "Q3.6_6",         # Financial and credit risks
+  
+  # Technology risks (technological obsolescence)
+  Technology = "Q3.6_7",        # Technology and innovation risks
+  
+  # Supply chain risks (supply chain disruption)
+  SupplyChain = "Q3.6_8",       # Supply chain risks
+  
+  # Reputational risks (brand and reputation damage)
+  Reputational = "Q3.6_9",      # Reputational and brand risks
+  
+  # Litigation risks (legal and liability exposure)
+  Litigation = "Q3.6_10"        # Litigation and liability risks
+)
+
+# Alternative column mapping for different survey versions (if applicable)
+# This allows for backward compatibility with different survey exports
+COLUMN_MAP_ALTERNATIVES <- list(
+  # Alternative naming convention 1 (descriptive names)
+  alt1 = list(
+    Physical = "physical_risk",
+    Operational = "operational_risk",
+    Policy = "policy_risk",
+    Regulatory = "regulatory_risk",
+    Market = "market_risk",
+    Financial = "financial_risk",
+    Technology = "technology_risk",
+    SupplyChain = "supply_chain_risk",
+    Reputational = "reputational_risk",
+    Litigation = "litigation_risk"
+  ),
+  
+  # Alternative naming convention 2 (with Q3.6 prefix)
+  alt2 = list(
+    Physical = "Q3.6_physical_risk",
+    Operational = "Q3.6_operational_risk",
+    Policy = "Q3.6_policy_risk",
+    Regulatory = "Q3.6_regulatory_risk",
+    Market = "Q3.6_market_risk",
+    Financial = "Q3.6_financial_risk",
+    Technology = "Q3.6_technology_risk",
+    SupplyChain = "Q3.6_supply_chain_risk",
+    Reputational = "Q3.6_reputational_risk",
+    Litigation = "Q3.6_litigation_risk"
+  )
 )
 
 # =============================================================================
@@ -166,6 +259,54 @@ normalize_progress <- function(x) {
   }
   x_num[is.na(x_num)] <- 0
   return(x_num)
+}
+
+# Helper function to detect risk columns using COLUMN_MAP
+detect_risk_columns <- function(df) {
+  # Try primary mapping first
+  found_cols <- list()
+  all_found <- TRUE
+  
+  for (factor_name in names(COLUMN_MAP)) {
+    col_name <- COLUMN_MAP[[factor_name]]
+    if (col_name %in% names(df)) {
+      found_cols[[factor_name]] <- col_name
+    } else {
+      all_found <- FALSE
+      break
+    }
+  }
+  
+  # If primary mapping doesn't work, try alternatives
+  if (!all_found) {
+    for (alt_name in names(COLUMN_MAP_ALTERNATIVES)) {
+      alt_map <- COLUMN_MAP_ALTERNATIVES[[alt_name]]
+      found_cols <- list()
+      all_found <- TRUE
+      
+      for (factor_name in names(alt_map)) {
+        col_name <- alt_map[[factor_name]]
+        if (col_name %in% names(df)) {
+          found_cols[[factor_name]] <- col_name
+        } else {
+          all_found <- FALSE
+          break
+        }
+      }
+      
+      if (all_found) {
+        message(sprintf("Using alternative column mapping: %s", alt_name))
+        return(found_cols)
+      }
+    }
+  }
+  
+  if (length(found_cols) == length(COLUMN_MAP)) {
+    return(found_cols)
+  } else {
+    warning("Not all risk columns found in dataframe")
+    return(found_cols)
+  }
 }
 
 # =============================================================================
@@ -436,7 +577,8 @@ ERROR_MESSAGES <- list(
   deprecated_file = "Deprecated file detected: %s",
   column_missing = "Required column missing: %s",
   data_corruption = "Data integrity check failed for: %s",
-  quota_mismatch = "Quota requirements not met for category: %s"
+  quota_mismatch = "Quota requirements not met for category: %s",
+  risk_columns_missing = "Risk perception columns not found in data"
 )
 
 # =============================================================================
@@ -473,6 +615,7 @@ if (!exists(".config_00_initialized", envir = .GlobalEnv)) {
       message("  Target N: (defined in appendix_j_config.R)")
     }
     message(sprintf("  Pipeline paths configured: %d", length(PATHS)))
+    message(sprintf("  Risk factors mapped: %d", length(COLUMN_MAP)))
     message(sprintf("  Quality parameters set: %d", length(QUALITY_PARAMS)))
   }
   

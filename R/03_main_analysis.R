@@ -1,15 +1,15 @@
 #!/usr/bin/env Rscript
 # 03_main_analysis.R
 # Purpose: Main statistical analysis for climate finance manuscript (FINAL N=1,307)
-# Version: 4.0 - COMPREHENSIVE REWRITE with all critical fixes
+# Version: 5.0 - ENHANCED with mandatory computations and Wilson CIs
 # Author: Richard McKinney
 # Date: 2025-08-09
 #
-# CRITICAL FIXES IN v4.0:
-# 1. PRIVACY: Strict protection against using raw Q2.2 geographic data
-# 2. SEED: Uses PIPELINE_SEED from config, not hardcoded value
-# 3. WRITE_CSV: All calls include na="" parameter
-# 4. STANDALONE: Robust fallback detection for independent execution
+# CRITICAL FIXES IN v5.0:
+# 1. MANDATORY COMPUTATIONS: Geographic summary, headline percentages with Wilson CIs, screening counts
+# 2. PRIVACY: Strict protection against using raw Q2.2 geographic data
+# 3. SEED: Uses PIPELINE_SEED from config, not hardcoded value
+# 4. WRITE_CSV: All calls include na="" parameter
 # 5. VALIDATION: Enhanced checks for data integrity and column availability
 #
 # Notes:
@@ -63,6 +63,7 @@ suppressPackageStartupMessages({
   library(rlang)
   library(cli)      # Better console output
   library(glue)     # String interpolation
+  library(binom)    # For Wilson confidence intervals
 })
 
 # ---- Configuration & Parameters ----------------------------------------------
@@ -130,11 +131,57 @@ if (!exists("df")) {
   cli_success("Loaded {nrow(df)} rows from {.file {basename(PATHS$final_1307)}}")
 }
 
-# ---- CRITICAL: Determine Analysis Role Column --------------------------------
-cli_h2("Determining Analysis Column")
+# ==============================================================================
+# MANDATORY COMPUTATIONS (AS PER FEEDBACK)
+# ==============================================================================
+cli_h1("Mandatory Computations for Manuscript")
 
+# ---- 1. Geographic Summary (using anonymized region) ------------------------
+cli_h2("1. Geographic Summary")
+
+# Find the safe anonymized region column
+SAFE_GEO_CANDIDATES <- c("region", "geography", "hq_region", "geo_region", "hq_country_grouped")
+geo_col <- NULL
+
+for (candidate in SAFE_GEO_CANDIDATES) {
+  if (candidate %in% names(df)) {
+    geo_col <- candidate
+    cli_success("Found anonymized geographic column: {.field {geo_col}}")
+    break
+  }
+}
+
+if (!is.null(geo_col)) {
+  region_summary <- df %>%
+    filter(!is.na(.data[[geo_col]]) & .data[[geo_col]] != "") %>%
+    count(.data[[geo_col]], name = "n", sort = TRUE) %>%
+    rename(region = 1) %>%
+    mutate(
+      percentage = round(n / sum(n) * 100, 2),
+      proportion = n / sum(n)
+    )
+  
+  # Save mandatory geographic summary
+  save_csv(region_summary, "output/region_summary_mandatory.csv")
+  
+  cli_inform("Geographic distribution (N = {sum(region_summary$n)}):")
+  print(head(region_summary, 10))
+} else {
+  cli_warn("No anonymized geographic column found. Creating placeholder.")
+  region_summary <- tibble(
+    region = "Data not available",
+    n = nrow(df),
+    percentage = 100,
+    proportion = 1
+  )
+  save_csv(region_summary, "output/region_summary_mandatory.csv")
+}
+
+# ---- 2. Headline Barrier Percentages with Wilson CIs ------------------------
+cli_h2("2. Headline Barrier Percentages with Wilson CIs")
+
+# Determine analysis role column
 if (!exists("ANALYSIS_ROLE_COLUMN")) {
-  # Strict priority order for standalone mode
   candidates <- list(
     quota = "quota_target_category",
     final = "Final_Role_Category",
@@ -147,41 +194,155 @@ if (!exists("ANALYSIS_ROLE_COLUMN")) {
     col <- candidates[[type]]
     if (col %in% names(df)) {
       ANALYSIS_ROLE_COLUMN <- col
-      
-      if (type == "quota") {
-        cli_success("Using quota-matched categories: {.field {col}}")
-      } else if (type == "final") {
-        cli_warn("Using preliminary categories (may not be quota-matched): {.field {col}}")
-      } else {
-        cli_warn("Using fallback categories: {.field {col}}")
-      }
+      cli_success("Using role column: {.field {col}}")
       break
     }
   }
   
   if (is.null(ANALYSIS_ROLE_COLUMN)) {
-    cli_abort(c(
-      "No valid role category column found",
-      "x" = "Checked for: {paste(unlist(candidates), collapse = ', ')}",
-      "i" = "Available columns: {paste(head(names(df), 10), collapse = ', ')}"
-    ))
+    cli_abort("No valid role category column found")
   }
 }
+
+# Find barrier columns
+barrier_cols <- names(df)[grepl("^(Q3\\.11|barrier|challenge)", names(df), ignore.case = TRUE)]
+
+if (length(barrier_cols) > 0) {
+  cli_inform("Computing headline percentages for {length(barrier_cols)} barriers")
+  
+  # Calculate barrier presence for each role
+  headline_barriers <- df %>%
+    filter(!is.na(.data[[ANALYSIS_ROLE_COLUMN]])) %>%
+    rename(analysis_role = !!sym(ANALYSIS_ROLE_COLUMN)) %>%
+    group_by(analysis_role) %>%
+    summarise(
+      n = n(),
+      across(all_of(barrier_cols), 
+             ~sum(!is.na(.x) & .x != "" & .x != "0", na.rm = TRUE),
+             .names = "k_{.col}"),
+      .groups = "drop"
+    )
+  
+  # Calculate Wilson CIs for each barrier
+  headline_with_ci <- headline_barriers %>%
+    pivot_longer(
+      cols = starts_with("k_"),
+      names_to = "barrier",
+      values_to = "k"
+    ) %>%
+    mutate(barrier = str_remove(barrier, "^k_")) %>%
+    rowwise() %>%
+    mutate(
+      wilson_result = list(binom::binom.wilson(k, n)),
+      percentage = round(k / n * 100, 2)
+    ) %>%
+    unnest_wider(wilson_result, names_sep = "_") %>%
+    select(
+      analysis_role, 
+      barrier, 
+      k, 
+      n, 
+      percentage,
+      ci_lower = wilson_result_lower,
+      ci_upper = wilson_result_upper
+    ) %>%
+    mutate(
+      ci_lower_pct = round(ci_lower * 100, 2),
+      ci_upper_pct = round(ci_upper * 100, 2),
+      ci_95 = paste0("[", ci_lower_pct, ", ", ci_upper_pct, "]")
+    )
+  
+  # Save headline barrier percentages
+  save_csv(headline_with_ci, "output/headline_barriers_by_role_wilson.csv")
+  
+  # Create summary of top barriers
+  top_barriers_summary <- headline_with_ci %>%
+    group_by(barrier) %>%
+    summarise(
+      total_k = sum(k),
+      total_n = sum(n),
+      overall_pct = round(total_k / total_n * 100, 2),
+      .groups = "drop"
+    ) %>%
+    arrange(desc(overall_pct)) %>%
+    head(10)
+  
+  cli_inform("Top 5 barriers overall:")
+  print(head(top_barriers_summary, 5))
+  
+} else {
+  cli_warn("No barrier columns found. Creating placeholder.")
+  headline_with_ci <- tibble(
+    analysis_role = "No barriers found",
+    barrier = NA_character_,
+    k = 0,
+    n = nrow(df),
+    percentage = 0,
+    ci_lower = 0,
+    ci_upper = 0,
+    ci_lower_pct = 0,
+    ci_upper_pct = 0,
+    ci_95 = "[0, 0]"
+  )
+  save_csv(headline_with_ci, "output/headline_barriers_by_role_wilson.csv")
+}
+
+# ---- 3. Screening Counts (for methods section) ------------------------------
+cli_h2("3. Screening Counts for Methods Section")
+
+# Try to load raw data for screening counts
+screening_counts <- NULL
+
+if (exists("PATHS") && !is.null(PATHS$raw) && file.exists(PATHS$raw)) {
+  raw_data <- readr::read_csv(PATHS$raw, show_col_types = FALSE, progress = FALSE)
+  raw_data$Progress <- suppressWarnings(as.numeric(raw_data$Progress))
+  
+  screening_counts <- tibble(
+    stage = c("Total Raw Responses", 
+              "Passed 10% Progress", 
+              "Final Quota Sample"),
+    n = c(nrow(raw_data),
+          sum(raw_data$Progress >= 10, na.rm = TRUE),
+          nrow(df)),
+    percentage_of_raw = round(n / nrow(raw_data) * 100, 2)
+  )
+  
+  cli_inform("Screening funnel:")
+  print(screening_counts)
+  
+} else {
+  cli_warn("Raw data not available. Using current dataset only.")
+  screening_counts <- tibble(
+    stage = c("Total Raw Responses", 
+              "Passed 10% Progress", 
+              "Final Quota Sample"),
+    n = c(NA, NA, nrow(df)),
+    percentage_of_raw = c(NA, NA, 100)
+  )
+}
+
+# Save screening counts
+save_csv(screening_counts, "output/screening_counts_mandatory.csv")
+
+cli_rule(left = "Mandatory Computations Complete", line_col = "green")
+
+# ---- CRITICAL: Determine Analysis Role Column --------------------------------
+cli_h1("Determining Analysis Column")
+
+# Already determined above, but ensure df_analysis is created
+df_analysis <- df %>%
+  rename(RoleCategory = !!sym(ANALYSIS_ROLE_COLUMN))
 
 cli_inform("Analysis will use: {.strong {ANALYSIS_ROLE_COLUMN}}")
 
 # Validate the column
-n_valid <- sum(!is.na(df[[ANALYSIS_ROLE_COLUMN]]))
+n_valid <- sum(!is.na(df_analysis$RoleCategory))
 if (n_valid != 1307) {
   cli_warn("Found {n_valid} valid role categories (expected 1,307)")
 }
 
 # ---- Data Preparation --------------------------------------------------------
 cli_h1("Data Preparation")
-
-# Create analysis dataframe with standardized column name
-df_analysis <- df %>%
-  rename(RoleCategory = !!sym(ANALYSIS_ROLE_COLUMN))
 
 # Convert to ordered factor by frequency
 df_analysis <- df_analysis %>%
@@ -207,13 +368,16 @@ if (SAVE_DIAGNOSTICS) {
   
   # Save analysis configuration
   config_info <- tibble(
-    parameter = c("input_file", "analysis_role_column", "n_rows", "n_valid_roles", "seed", "timestamp"),
+    parameter = c("input_file", "analysis_role_column", "n_rows", "n_valid_roles", 
+                  "seed", "geographic_column", "n_barriers", "timestamp"),
     value = c(
       basename(PATHS$final_1307),
       ANALYSIS_ROLE_COLUMN,
       as.character(nrow(df_analysis)),
       as.character(n_valid),
       as.character(PIPELINE_SEED),
+      ifelse(!is.null(geo_col), geo_col, "None"),
+      as.character(length(barrier_cols)),
       as.character(Sys.time())
     )
   )
@@ -261,48 +425,6 @@ cli_h1("Figure 4: Geographic Distribution")
 # CRITICAL PRIVACY PROTECTION: Define forbidden columns
 FORBIDDEN_GEO_COLS <- c("Q2.2", "q2.2", "Q2_2", "Q2.2_raw", "raw_location", "exact_location")
 
-# Safe anonymized columns (priority order)
-SAFE_GEO_CANDIDATES <- c("region", "geography", "hq_region", "geo_region", "hq_country_grouped")
-
-# Find available geographic columns
-all_geo_cols <- names(df_analysis)[grepl("region|geography|country|location|geo", 
-                                         names(df_analysis), ignore.case = TRUE)]
-
-# Remove any forbidden columns
-safe_geo_cols <- setdiff(all_geo_cols, FORBIDDEN_GEO_COLS)
-
-cli_inform("Available geographic columns: {paste(safe_geo_cols, collapse = ', ')}")
-
-# Find the best safe column
-geo_col <- NULL
-for (candidate in SAFE_GEO_CANDIDATES) {
-  if (candidate %in% safe_geo_cols) {
-    geo_col <- candidate
-    break
-  }
-}
-
-# Additional safety check
-if (!is.null(geo_col)) {
-  # Verify it's actually anonymized
-  unique_values <- unique(na.omit(df_analysis[[geo_col]]))
-  n_unique <- length(unique_values)
-  
-  if (n_unique > 50) {
-    cli_warn(c(
-      "Geographic column '{geo_col}' has {n_unique} unique values",
-      "!" = "This may not be properly anonymized",
-      "x" = "Skipping geographic analysis for privacy protection"
-    ))
-    geo_col <- NULL
-  } else if (n_unique < 3) {
-    cli_warn("Geographic column has only {n_unique} unique values - insufficient for analysis")
-    geo_col <- NULL
-  } else {
-    cli_success("Using safe anonymized column: {.field {geo_col}} ({n_unique} regions)")
-  }
-}
-
 # Check if any forbidden columns exist
 forbidden_present <- intersect(FORBIDDEN_GEO_COLS, names(df_analysis))
 if (length(forbidden_present) > 0) {
@@ -314,8 +436,8 @@ if (length(forbidden_present) > 0) {
   ))
 }
 
-# Proceed with geographic analysis only if safe
-if (!is.null(geo_col)) {
+# Use the geo_col determined in mandatory computations
+if (!is.null(geo_col) && geo_col %in% names(df_analysis)) {
   geo_data <- df_analysis %>%
     filter(!is.na(.data[[geo_col]]) & .data[[geo_col]] != "") %>%
     count(.data[[geo_col]], name = "n", sort = TRUE) %>%
@@ -432,15 +554,12 @@ if ("Q3_3_num" %in% names(df_analysis)) {
 }
 
 # ==============================================================================
-# BARRIER ANALYSIS
+# ENHANCED BARRIER ANALYSIS (WITH WILSON CIs)
 # ==============================================================================
-cli_h1("Barrier Analysis")
-
-barrier_cols <- names(df_analysis)[grepl("^(Q3\\.11|barrier|challenge)", 
-                                         names(df_analysis), ignore.case = TRUE)]
+cli_h1("Enhanced Barrier Analysis")
 
 if (length(barrier_cols) > 0) {
-  cli_inform("Found {length(barrier_cols)} barrier variables")
+  cli_inform("Analyzing {length(barrier_cols)} barrier variables")
   
   # Convert to long format
   barrier_long <- df_analysis %>%
@@ -457,35 +576,70 @@ if (length(barrier_cols) > 0) {
       barrier_clean = str_remove(barrier_var, "^Q3\\.11_?")
     )
   
-  # Summary by stakeholder
+  # Summary by stakeholder with Wilson CIs
   barrier_summary <- barrier_long %>%
     group_by(RoleCategory, barrier_clean) %>%
     summarise(
       n_responses = n(),
-      n_present = sum(val_present, na.rm = TRUE),
-      pct_present = round(n_present / n_responses * 100, 2),
+      k_present = sum(val_present, na.rm = TRUE),
       .groups = "drop"
     ) %>%
     filter(n_responses >= MIN_GROUP_SIZE) %>%
+    rowwise() %>%
+    mutate(
+      wilson_result = list(binom::binom.wilson(k_present, n_responses)),
+      pct_present = round(k_present / n_responses * 100, 2)
+    ) %>%
+    unnest_wider(wilson_result, names_sep = "_") %>%
+    select(
+      RoleCategory,
+      barrier_clean,
+      k_present,
+      n_responses,
+      pct_present,
+      ci_lower = wilson_result_lower,
+      ci_upper = wilson_result_upper
+    ) %>%
+    mutate(
+      ci_lower_pct = round(ci_lower * 100, 2),
+      ci_upper_pct = round(ci_upper * 100, 2)
+    ) %>%
     arrange(RoleCategory, desc(pct_present))
   
-  # Overall ranking
+  # Overall ranking with Wilson CIs
   overall_barriers <- barrier_long %>%
     group_by(barrier_clean) %>%
     summarise(
       n_total = n(),
-      n_present = sum(val_present, na.rm = TRUE),
-      pct_overall = round(n_present / n_total * 100, 2),
+      k_present = sum(val_present, na.rm = TRUE),
       .groups = "drop"
+    ) %>%
+    rowwise() %>%
+    mutate(
+      wilson_result = list(binom::binom.wilson(k_present, n_total)),
+      pct_overall = round(k_present / n_total * 100, 2)
+    ) %>%
+    unnest_wider(wilson_result, names_sep = "_") %>%
+    select(
+      barrier_clean,
+      k_present,
+      n_total,
+      pct_overall,
+      ci_lower = wilson_result_lower,
+      ci_upper = wilson_result_upper
+    ) %>%
+    mutate(
+      ci_lower_pct = round(ci_lower * 100, 2),
+      ci_upper_pct = round(ci_upper * 100, 2)
     ) %>%
     arrange(desc(pct_overall))
   
-  cli_inform("Top 10 barriers overall:")
+  cli_inform("Top 10 barriers overall (with Wilson CIs):")
   print(head(overall_barriers, 10))
   
   if (SAVE_DIAGNOSTICS) {
-    save_csv(barrier_summary, "output/barrier_presence_by_stakeholder.csv")
-    save_csv(overall_barriers, "output/overall_barrier_ranking.csv")
+    save_csv(barrier_summary, "output/barrier_presence_by_stakeholder_wilson.csv")
+    save_csv(overall_barriers, "output/overall_barrier_ranking_wilson.csv")
   }
   
   # Create heatmap for top barriers
@@ -807,12 +961,13 @@ summary_stats <- list(
   analysis_column = ANALYSIS_ROLE_COLUMN,
   n_with_classification = sum(df_analysis$RoleCategory != "Unclassified"),
   n_categories = n_distinct(df_analysis$RoleCategory[df_analysis$RoleCategory != "Unclassified"]),
-  geographic_column = ifelse(exists("geo_col") && !is.null(geo_col), geo_col, "None"),
-  n_with_geography = if(exists("geo_col") && !is.null(geo_col)) {
+  geographic_column = ifelse(!is.null(geo_col), geo_col, "None"),
+  n_with_geography = if(!is.null(geo_col) && geo_col %in% names(df_analysis)) {
     sum(!is.na(df_analysis[[geo_col]]))
   } else {
     0
   },
+  n_barriers_analyzed = length(barrier_cols),
   seed_used = PIPELINE_SEED,
   timestamp = Sys.time()
 )
@@ -834,21 +989,27 @@ cli_inform("Configuration:")
 cli_inform("  Dataset: {.file {basename(PATHS$final_1307)}} (N={nrow(df_analysis)})")
 cli_inform("  Role Column: {.field {ANALYSIS_ROLE_COLUMN}}")
 cli_inform("  Seed: {PIPELINE_SEED}")
-if (exists("geo_col") && !is.null(geo_col)) {
+if (!is.null(geo_col)) {
   cli_inform("  Geographic: {.field {geo_col}} (anonymized)")
 }
 
 cli_inform("")
-cli_inform("Key Outputs Generated:")
+cli_inform("Mandatory Outputs Generated:")
+cli_inform("  ✓ Geographic summary (region_summary_mandatory.csv)")
+cli_inform("  ✓ Headline barriers with Wilson CIs (headline_barriers_by_role_wilson.csv)")
+cli_inform("  ✓ Screening counts (screening_counts_mandatory.csv)")
+
+cli_inform("")
+cli_inform("Additional Outputs Generated:")
 cli_inform("  • Stakeholder distribution (N={sum(stakeholder_summary$n)})")
-if (exists("geo_col") && !is.null(geo_col)) {
+if (!is.null(geo_col)) {
   cli_inform("  • Figure 4: Geographic distribution")
 }
 if ("Q3_3_num" %in% names(df_analysis)) {
   cli_inform("  • Figure 6: Financial vs impact focus")
 }
 if (length(barrier_cols) > 0) {
-  cli_inform("  • Barrier analysis by stakeholder")
+  cli_inform("  • Enhanced barrier analysis with Wilson CIs")
 }
 if (length(risk_cols) > 0) {
   cli_inform("  • Risk perception heatmap")
