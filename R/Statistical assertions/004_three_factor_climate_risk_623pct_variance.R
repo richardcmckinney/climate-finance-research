@@ -1,12 +1,34 @@
-# ===============================
 # File: 004_three_factor_climate_risk_623pct_variance.R
-# Purpose: PCA on Q12.13_* items → 3 factors; total variance explained
-# ===============================
-data <- read.csv("survey_responses_anonymized_preliminary.csv", stringsAsFactors = FALSE)
-suppressPackageStartupMessages(library(psych))
-risk_items <- data[, grep("^Q12\\.13_", names(data))]
-risk_num <- as.data.frame(lapply(risk_items, function(x) as.numeric(x)))
-risk_num <- na.omit(risk_num)
-pca_result <- principal(risk_num, nfactors = 3, rotate = "varimax")
-variance_explained <- 100 * sum(pca_result$values[1:3]) / sum(pca_result$values)
-cat("Variance explained by 3 factors (%):", round(variance_explained, 1), "\n")
+# Purpose: Replicate the manuscript statistical test or descriptive statistic for this specific assertion.
+# Manuscript assertion: "Three-Factor Climate Risk Model... (62.3% variance)"
+# Notes: This script expects the CSV at: /mnt/data/survey_responses_anonymized_preliminary.csv
+#        Ensure required packages are installed (psych, effectsize, pwr, vcd, naniar, lavaan, nnet, MASS, car).
+
+# ---- Setup ----
+suppressWarnings(suppressMessages({
+  required_pkgs <- c("psych","effectsize","pwr","vcd","naniar","lavaan","nnet","MASS","car")
+  for (p in required_pkgs) { if (!requireNamespace(p, quietly = TRUE)) { message(sprintf("Package '%s' not installed; attempting to proceed if not needed in this script.", p)) } }
+}))
+
+# Load data (literal path to the attached file)
+data <- tryCatch({
+  read.csv("/mnt/data/survey_responses_anonymized_preliminary.csv", stringsAsFactors = FALSE, check.names = FALSE)
+}, error = function(e) {
+  stop("Could not read CSV at /mnt/data/survey_responses_anonymized_preliminary.csv: ", e)
+})
+
+# Convenience: treat common columns
+# Ensure key columns exist (Status, Progress)
+if (!("Status" %in% names(data))) stop("Column 'Status' not found.")
+if (!("Progress" %in% names(data))) stop("Column 'Progress' not found.")
+
+# Clean subset similar to manuscript logic
+data_clean <- subset(data, Status == "IP Address" & suppressWarnings(as.numeric(Progress)) >= 10)
+
+risk_cols <- grep("^Q12\.13_", names(data), value = TRUE)[1:10]
+risk_items <- data[, risk_cols, drop = FALSE]
+risk_items_clean <- na.omit(apply(risk_items, 2, function(x) suppressWarnings(as.numeric(x))))
+if (!requireNamespace("psych", quietly = TRUE)) stop("Package 'psych' required.")
+pca_result <- psych::principal(risk_items_clean, nfactors = 3, rotate = "varimax")
+variance_explained <- sum(pca_result$values[1:3]) / sum(pca_result$values) * 100
+cat("Variance explained (3-factor):", round(variance_explained, 2), "%\n")

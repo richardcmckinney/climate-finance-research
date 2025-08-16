@@ -1,9 +1,30 @@
-# ===============================
 # File: 012_esg_investors_42_32pct.R
-# Purpose: Count & % of ESG investors
-# ===============================
-data <- read.csv("survey_responses_anonymized_preliminary.csv", stringsAsFactors = FALSE)
-analytic <- subset(data, Status == "IP Address" & as.numeric(Progress) >= 10)
-esg_n <- sum(analytic$Q2.1 == "8", na.rm = TRUE)
-esg_pct <- 100 * esg_n / nrow(analytic)
-cat("ESG count:", esg_n, " ESG %:", round(esg_pct, 1), "\n")
+# Purpose: Replicate the manuscript statistical test or descriptive statistic for this specific assertion.
+# Manuscript assertion: "ESG investors (n=42, 3.2%)"
+# Notes: This script expects the CSV at: /mnt/data/survey_responses_anonymized_preliminary.csv
+#        Ensure required packages are installed (psych, effectsize, pwr, vcd, naniar, lavaan, nnet, MASS, car).
+
+# ---- Setup ----
+suppressWarnings(suppressMessages({
+  required_pkgs <- c("psych","effectsize","pwr","vcd","naniar","lavaan","nnet","MASS","car")
+  for (p in required_pkgs) { if (!requireNamespace(p, quietly = TRUE)) { message(sprintf("Package '%s' not installed; attempting to proceed if not needed in this script.", p)) } }
+}))
+
+# Load data (literal path to the attached file)
+data <- tryCatch({
+  read.csv("/mnt/data/survey_responses_anonymized_preliminary.csv", stringsAsFactors = FALSE, check.names = FALSE)
+}, error = function(e) {
+  stop("Could not read CSV at /mnt/data/survey_responses_anonymized_preliminary.csv: ", e)
+})
+
+# Convenience: treat common columns
+# Ensure key columns exist (Status, Progress)
+if (!("Status" %in% names(data))) stop("Column 'Status' not found.")
+if (!("Progress" %in% names(data))) stop("Column 'Progress' not found.")
+
+# Clean subset similar to manuscript logic
+data_clean <- subset(data, Status == "IP Address" & suppressWarnings(as.numeric(Progress)) >= 10)
+
+esg_count <- sum(data$Q2.1 == "8" & data$Status == "IP Address", na.rm = TRUE)
+esg_pct <- (esg_count / nrow(data_clean)) * 100
+cat("ESG count:", esg_count, " Percent:", round(esg_pct,2), "\n")

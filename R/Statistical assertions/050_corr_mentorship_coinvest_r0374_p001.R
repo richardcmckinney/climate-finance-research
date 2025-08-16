@@ -1,8 +1,28 @@
-# ===============================
 # File: 050_corr_mentorship_coinvest_r0374_p001.R
-# Purpose: Mentorship flag (Q3.10 contains '2') vs co-invest (Q3.8_12)
-# ===============================
-data <- read.csv("survey_responses_anonymized_preliminary.csv", stringsAsFactors = FALSE)
-mentorship <- as.numeric(grepl("\\b2\\b", data$Q3.10))
-coinvest <- as.numeric(data$Q3.8_12)
-print(cor.test(mentorship, coinvest, use="complete.obs"))
+# Purpose: Replicate the manuscript statistical test or descriptive statistic for this specific assertion.
+# Manuscript assertion: "mentorship correlated with co-investment interest (r=.374, p<.001)"
+# Notes: This script expects the CSV at: /mnt/data/survey_responses_anonymized_preliminary.csv
+#        Ensure required packages are installed (psych, effectsize, pwr, vcd, naniar, lavaan, nnet, MASS, car).
+
+# ---- Setup ----
+suppressWarnings(suppressMessages({
+  required_pkgs <- c("psych","effectsize","pwr","vcd","naniar","lavaan","nnet","MASS","car")
+  for (p in required_pkgs) { if (!requireNamespace(p, quietly = TRUE)) { message(sprintf("Package '%s' not installed; attempting to proceed if not needed in this script.", p)) } }
+}))
+
+# Load data (literal path to the attached file)
+data <- tryCatch({
+  read.csv("/mnt/data/survey_responses_anonymized_preliminary.csv", stringsAsFactors = FALSE, check.names = FALSE)
+}, error = function(e) {
+  stop("Could not read CSV at /mnt/data/survey_responses_anonymized_preliminary.csv: ", e)
+})
+
+# Convenience: treat common columns
+# Ensure key columns exist (Status, Progress)
+if (!("Status" %in% names(data))) stop("Column 'Status' not found.")
+if (!("Progress" %in% names(data))) stop("Column 'Progress' not found.")
+
+# Clean subset similar to manuscript logic
+data_clean <- subset(data, Status == "IP Address" & suppressWarnings(as.numeric(Progress)) >= 10)
+
+mentorship <- as.numeric(grepl("2", data$Q3.10)); coinvest <- suppressWarnings(as.numeric(data$Q3.8_12)); print(cor.test(mentorship, coinvest))
