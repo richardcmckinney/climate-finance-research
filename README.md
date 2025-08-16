@@ -5,6 +5,7 @@
 ![Data: CC BY 4.0](https://img.shields.io/badge/Data-CC%20BY%204.0-lightgrey.svg)
 ![Pipeline: Reproducible](https://img.shields.io/badge/Pipeline-Reproducible-green.svg)
 ![Artifacts: Verified](https://img.shields.io/badge/Artifacts-Verified-brightgreen.svg)
+[![renv sync check](https://github.com/richardcmckinney/climate-finance-research/actions/workflows/renv-sync.yml/badge.svg)](https://github.com/richardcmckinney/climate-finance-research/actions/workflows/renv-sync.yml)
 
 **Version 5.0.1** | **Last Updated: 2025-08-09 (UTC)**
 
