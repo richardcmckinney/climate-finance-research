@@ -7,7 +7,7 @@
 ![Artifacts: Verified](https://img.shields.io/badge/Artifacts-Verified-brightgreen.svg)
 [![renv sync check](https://github.com/richardcmckinney/climate-finance-research/actions/workflows/renv-sync.yml/badge.svg)](https://github.com/richardcmckinney/climate-finance-research/actions/workflows/renv-sync.yml)
 
-**Version 5.0.1** | **Last Updated: 2025-08-09 (UTC)**
+**Version 5.0.2** | **Last Updated: 2025-08-16 (UTC)**
 
 This repository contains the complete, deterministic, and validated pipeline for the manuscript **"The Capital–Opportunity Mismatch: A Multi‑Stakeholder Analysis of Climate Finance Barriers and Solutions."**
 
