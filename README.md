@@ -51,6 +51,7 @@ The pipeline transforms **raw survey exports** → **anonymized public data** �
 - [Environment & Determinism](#-environment--determinism)
 - [Quota-matching (N = 1,307)](#-quota-matching-n--1307-criteria--tie-breaks)
 - [Team Collaboration](#-team-collaboration)
+- [Environment (renv, Hooks & CI)](#-environment-renv-hooks--ci)
 - [Reproducibility & Openness Standards](#-reproducibility--openness-standards)
 - [Glossary & Column Invariants](#-glossary--column-invariants)
 - [Project Details](#-project-details)
@@ -1272,6 +1273,81 @@ classify_stakeholder <- function(response) {
 - **GitHub Issues:** Bug reports, feature requests
 - **GitHub Discussions:** Questions, ideas
 - **Email:** richardmckinney@pm.me for sensitive matters
+
+---
+
+## 🔧 Environment (renv, Hooks & CI)
+
+This repository enforces a reproducible environment using `renv`, a Git pre-commit hook for local validation, and a GitHub Actions workflow for remote CI verification. This ensures that the package library is always synchronized with the project's code.
+
+### Prerequisites
+
+- **R Version**: 4.5+ (tested on 4.5.1)
+- **`renv`**: Installed automatically by scripts where needed
+- **Git**
+
+### Local Enforcement (Pre-commit Hook)
+
+Every `git commit` automatically triggers a pre-commit hook that executes the `scripts/renv_sync.R` script. This script performs the following actions:
+
+- **Discovers Dependencies**: Scans project files for required packages using `renv::dependencies()`.
+- **Hydrates Library**: Installs missing packages, prioritizing fast hydration from the user's global library before falling back to CRAN.
+- **Snapshots Lockfile**: Updates `renv.lock` with the exact versions of all required packages.
+- **Verifies Consistency**: Runs `renv::status()` to confirm the project is in a consistent state.
+
+If the verification fails, the script exits with a non-zero status, **blocking the commit** until the issue is resolved.
+
+#### Healthy Pre-commit Output
+```bash
+▶ Discovering project dependencies…
+▶ Snapshotting lockfile…
+- The lockfile is already up to date.
+▶ renv::status():
+No issues found -- the project is in a consistent state.
+✓ Project synchronized with the lockfile.
+pre-commit: renv synchronized.
+
+#### Common Failures & Fixes
+If the hook blocks a commit because of a missing package, either install the package and re-commit or remove the unused `library()` call from your code. You can also run the synchronization script manually at any time:
+```bash
+Rscript scripts/renv_sync.R
+
+### Remote Enforcement (GitHub Actions CI)
+
+On every `push` and `pull request`, a GitHub Actions workflow (`.github/workflows/renv-sync.yml`) validates the environment remotely:
+
+1.  **Checks out** the repository.
+2.  **Sets up** the latest version of R.
+3.  **Caches** `renv` packages using the `renv.lock` hash as the key for speed.
+4.  **Restores** the project library using `renv::restore(prompt = FALSE)`.
+5.  **Verifies** consistency with `renv::status()`.
+
+The CI job will **fail** if `renv.lock` is out of sync with the project's dependencies, blocking the pull request from being merged. To ensure CI passes, always let the local pre-commit hook run successfully before pushing your changes.
+
+### Quick Start for New Contributors
+1.  Clone the repository:
+    ```bash
+    git clone [https://github.com/richardcmckinney/climate-finance-research.git](https://github.com/richardcmckinney/climate-finance-research.git)
+    cd climate-finance-research
+    ```
+2.  Restore the R environment:
+    ```r
+    # Run this command in your R console
+    if(!requireNamespace('renv', quietly=TRUE)) install.packages('renv'); renv::restore(prompt=FALSE)
+    ```
+3.  Run the pipeline:
+    ```bash
+    # Generate base artifacts
+    Rscript run_all.R --clean
+    
+    # Run the full analysis
+    Rscript run_all.R --clean --with-analysis
+    ```
+
+### Important Notes
+- Always commit from the project root directory to ensure the pre-commit hook is triggered.
+- If a commit is blocked, run `Rscript scripts/renv_sync.R` manually, fix any flagged issues, and then commit again.
+- The project's determinism is guaranteed by **Seed: 1307**, **Timezone: UTC**, and the **`renv.lock`** file. For full details, see the [Environment & Determinism](#-environment--determinism) section.
 
 ---
 

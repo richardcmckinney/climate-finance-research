@@ -1,6 +1,6 @@
 # =============== Global Setup & Variable Mapping =================
-# Statistical Assertion 68: "Modern portfolio theory applied by 67% (95% CI [63.7%, 70.2%]) with higher usage among institutional investors"
-# Purpose: Proportion analysis of portfolio optimization strategy adoption with stakeholder comparison
+# Statistical Assertion 68: "Modern portfolio theory applied by 67% (95% CI [63.7%, 70.2%])"
+# Purpose: Proportion analysis with Wilson confidence intervals for MPT application
 
 library(tidyverse)
 library(janitor)
@@ -9,72 +9,109 @@ library(DescTools)
 raw <- read.csv("survey_responses_anonymized_preliminary.csv") %>% clean_names()
 
 # Variable mapping
-COL_MPT_APPLICATION <- "modern_portfolio_theory_application"
+COL_MPT_APPLICATION <- "modern_portfolio_theory_applied"
 COL_STAKEHOLDER <- "stakeholder"
-COL_INSTITUTION_TYPE <- "institution_type"
-COL_AUM <- "assets_under_management"
 COL_PORTFOLIO_SIZE <- "portfolio_size"
+COL_EXPERIENCE_YEARS <- "experience_years"
+COL_OPTIMIZATION_METHOD <- "optimization_method"
+COL_RISK_ADJUSTED_RETURNS <- "risk_adjusted_returns"
 
 df <- raw %>%
   filter(status == "IP Address", as.numeric(progress) >= 10) %>%
   mutate(
-    modern_portfolio_theory_application = as.integer(modern_portfolio_theory_application),
+    modern_portfolio_theory_applied = as.integer(modern_portfolio_theory_applied),
     stakeholder = factor(stakeholder),
-    institution_type = factor(institution_type),
-    assets_under_management = as.numeric(assets_under_management),
-    portfolio_size = as.numeric(portfolio_size)
+    portfolio_size = as.numeric(portfolio_size),
+    experience_years = as.numeric(experience_years),
+    optimization_method = factor(optimization_method),
+    risk_adjusted_returns = as.numeric(risk_adjusted_returns)
   ) %>%
-  filter(!is.na(modern_portfolio_theory_application))
+  filter(!is.na(modern_portfolio_theory_applied))
 
-# Overall MPT application analysis
+# Overall proportion analysis
 n_total <- nrow(df)
-n_mpt <- sum(df$modern_portfolio_theory_application, na.rm = TRUE)
+n_mpt <- sum(df$modern_portfolio_theory_applied, na.rm = TRUE)
 prop_mpt <- n_mpt / n_total
 
 print("Overall Modern Portfolio Theory application:")
 print(paste("Total respondents:", n_total))
-print(paste("Using MPT:", n_mpt))
+print(paste("Applying MPT:", n_mpt))
 print(paste("Proportion:", round(prop_mpt * 100, 1), "%"))
 
-# Wilson confidence interval
+# Wilson confidence interval for overall proportion
 ci_wilson <- BinomCI(n_mpt, n_total, conf.level = 0.95, method = "wilson")
 print(paste("95% Wilson CI: [", round(ci_wilson[,"lwr.ci"] * 100, 1), "%, ", 
             round(ci_wilson[,"upr.ci"] * 100, 1), "%]", sep=""))
 
-# Alternative confidence interval methods
+# Additional confidence interval methods for robustness
 ci_exact <- BinomCI(n_mpt, n_total, conf.level = 0.95, method = "clopper-pearson")
 ci_wald <- BinomCI(n_mpt, n_total, conf.level = 0.95, method = "wald")
+ci_agresti <- BinomCI(n_mpt, n_total, conf.level = 0.95, method = "agresti-coull")
 
 print("Alternative confidence intervals:")
 print(paste("95% Exact CI: [", round(ci_exact[,"lwr.ci"] * 100, 1), "%, ", 
             round(ci_exact[,"upr.ci"] * 100, 1), "%]", sep=""))
 print(paste("95% Wald CI: [", round(ci_wald[,"lwr.ci"] * 100, 1), "%, ", 
             round(ci_wald[,"upr.ci"] * 100, 1), "%]", sep=""))
+print(paste("95% Agresti-Coull CI: [", round(ci_agresti[,"lwr.ci"] * 100, 1), "%, ", 
+            round(ci_agresti[,"upr.ci"] * 100, 1), "%]", sep=""))
 
-# Institutional vs non-institutional comparison
-if(!all(is.na(df$institution_type))) {
-  df_inst <- df %>%
-    filter(!is.na(institution_type)) %>%
-    mutate(
-      institutional = ifelse(institution_type %in% c("Bank", "Insurance", "Pension Fund", 
-                                                      "Sovereign Wealth Fund", "Asset Manager"),
-                            "Institutional", "Non-Institutional")
-    )
+# Breakdown by stakeholder
+stakeholder_breakdown <- df %>%
+  filter(!is.na(stakeholder)) %>%
+  group_by(stakeholder) %>%
+  summarise(
+    n = n(),
+    mpt_count = sum(modern_portfolio_theory_applied, na.rm = TRUE),
+    proportion = round(mean(modern_portfolio_theory_applied, na.rm = TRUE) * 100, 1),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(proportion))
+
+print("MPT application by stakeholder:")
+print(stakeholder_breakdown)
+
+# Statistical test for stakeholder differences
+if(length(unique(df$stakeholder)) > 1) {
+  stakeholder_table <- table(df$stakeholder, df$modern_portfolio_theory_applied)
+  chi_stakeholder <- chisq.test(stakeholder_table)
+  print("Chi-square test for stakeholder variation:")
+  print(paste("χ²(", chi_stakeholder$parameter, ") =", round(chi_stakeholder$statistic, 2)))
+  print(paste("p-value:", format(chi_stakeholder$p.value, scientific = TRUE)))
   
-  inst_comparison <- df_inst %>%
-    group_by(institutional) %>%
+  # Cramér's V for effect size
+  cramers_v <- sqrt(chi_stakeholder$statistic / (sum(stakeholder_table) * (min(dim(stakeholder_table)) - 1)))
+  print(paste("Cramér's V =", round(cramers_v, 3)))
+}
+
+# Analysis by portfolio size
+if(sum(!is.na(df$portfolio_size)) > 50) {
+  df_portfolio <- df %>%
+    filter(!is.na(portfolio_size))
+  
+  # Categorize portfolio sizes
+  portfolio_analysis <- df_portfolio %>%
+    mutate(
+      portfolio_category = case_when(
+        portfolio_size <= 10 ~ "Small (≤10)",
+        portfolio_size <= 50 ~ "Medium (11-50)",
+        portfolio_size > 50 ~ "Large (>50)"
+      )
+    ) %>%
+    group_by(portfolio_category) %>%
     summarise(
       n = n(),
-      mpt_count = sum(modern_portfolio_theory_application),
-      proportion = round(mean(modern_portfolio_theory_application) * 100, 1),
+      mpt_count = sum(modern_portfolio_theory_applied),
+      proportion = round(mean(modern_portfolio_theory_applied) * 100, 1),
       .groups = "drop"
-    )
+    ) %>%
+    arrange(desc(proportion))
   
-  print("MPT usage by institutional status:")
-  print(inst_comparison)
+  print("MPT application by portfolio size:")
+  print(portfolio_analysis)
   
-  # Calculate Wilson CIs for each group
-  inst_comparison_ci <- inst_comparison %>%
+  # Calculate Wilson CIs for each portfolio size
+  portfolio_ci <- portfolio_analysis %>%
     rowwise() %>%
     mutate(
       ci_data = list(BinomCI(mpt_count, n, conf.level = 0.95, method = "wilson")),
@@ -84,182 +121,245 @@ if(!all(is.na(df$institution_type))) {
     ) %>%
     select(-ci_data)
   
-  print("Institutional comparison with 95% Wilson CIs:")
-  print(inst_comparison_ci %>% select(institutional, n, proportion, ci_text))
+  print("Portfolio size proportions with 95% Wilson CIs:")
+  print(portfolio_ci %>% select(portfolio_category, n, proportion, ci_text))
   
-  # Fisher's exact test for institutional difference
-  if(nrow(inst_comparison) == 2) {
-    inst_table <- table(df_inst$institutional, df_inst$modern_portfolio_theory_application)
-    fisher_inst <- fisher.test(inst_table)
-    print("Institutional vs Non-institutional (Fisher's exact test):")
-    print(paste("p-value:", format(fisher_inst$p.value, scientific = TRUE)))
-    print(paste("Odds ratio:", round(fisher_inst$estimate, 2)))
-    print(paste("95% CI for OR: [", round(fisher_inst$conf.int[1], 2), ", ",
-                round(fisher_inst$conf.int[2], 2), "]", sep=""))
-  }
+  # Point-biserial correlation with portfolio size
+  cor_portfolio <- cor.test(df_portfolio$modern_portfolio_theory_applied, 
+                            df_portfolio$portfolio_size)
+  
+  print("MPT application × Portfolio size correlation:")
+  print(paste("r =", round(cor_portfolio$estimate, 3)))
+  print(paste("95% CI: [", round(cor_portfolio$conf.int[1], 3), ", ", 
+              round(cor_portfolio$conf.int[2], 3), "]", sep=""))
+  print(paste("p-value:", format(cor_portfolio$p.value, scientific = TRUE)))
 }
 
-# Breakdown by stakeholder type
-stakeholder_breakdown <- df %>%
-  filter(!is.na(stakeholder)) %>%
-  group_by(stakeholder) %>%
-  summarise(
-    n = n(),
-    mpt_count = sum(modern_portfolio_theory_application, na.rm = TRUE),
-    proportion = round(mean(modern_portfolio_theory_application, na.rm = TRUE) * 100, 1),
-    .groups = "drop"
-  ) %>%
-  arrange(desc(proportion))
-
-print("MPT usage by stakeholder:")
-print(stakeholder_breakdown)
-
-# Chi-square test for stakeholder differences
-if(length(unique(df$stakeholder)) > 1) {
-  stakeholder_table <- table(df$stakeholder, df$modern_portfolio_theory_application)
-  chi_stakeholder <- chisq.test(stakeholder_table)
-  print("Chi-square test for stakeholder variation:")
-  print(paste("χ²(", chi_stakeholder$parameter, ") =", round(chi_stakeholder$statistic, 2)))
-  print(paste("p-value:", format(chi_stakeholder$p.value, scientific = TRUE)))
+# Analysis by experience years
+if(sum(!is.na(df$experience_years)) > 50) {
+  df_experience <- df %>%
+    filter(!is.na(experience_years))
   
-  # Cramér's V
-  cramers_v <- sqrt(chi_stakeholder$statistic / (sum(stakeholder_table) * 
-                    (min(dim(stakeholder_table)) - 1)))
-  print(paste("Cramér's V =", round(cramers_v, 3)))
-}
-
-# Analysis by AUM size
-if(sum(!is.na(df$assets_under_management)) > 50) {
-  df_aum <- df %>%
-    filter(!is.na(assets_under_management)) %>%
+  experience_analysis <- df_experience %>%
     mutate(
-      aum_category = case_when(
-        assets_under_management < 100 ~ "< $100M",
-        assets_under_management < 1000 ~ "$100M-$1B",
-        assets_under_management < 10000 ~ "$1B-$10B",
-        assets_under_management >= 10000 ~ "> $10B"
+      experience_category = case_when(
+        experience_years <= 5 ~ "Junior (≤5 years)",
+        experience_years <= 10 ~ "Mid-level (6-10 years)",
+        experience_years <= 15 ~ "Senior (11-15 years)",
+        experience_years > 15 ~ "Executive (>15 years)"
       )
+    ) %>%
+    group_by(experience_category) %>%
+    summarise(
+      n = n(),
+      mpt_count = sum(modern_portfolio_theory_applied),
+      proportion = round(mean(modern_portfolio_theory_applied) * 100, 1),
+      .groups = "drop"
+    ) %>%
+    filter(n >= 10) %>%
+    arrange(desc(proportion))
+  
+  print("MPT application by experience level (n ≥ 10):")
+  print(experience_analysis)
+  
+  # Test for experience level differences
+  if(nrow(experience_analysis) > 1) {
+    experience_table <- df_experience %>%
+      mutate(
+        experience_category = case_when(
+          experience_years <= 5 ~ "Junior",
+          experience_years <= 10 ~ "Mid-level",
+          experience_years <= 15 ~ "Senior",
+          experience_years > 15 ~ "Executive"
+        )
+      ) %>%
+      filter(!is.na(experience_category)) %>%
+      group_by(experience_category) %>%
+      filter(n() >= 10) %>%
+      ungroup() %>%
+      select(experience_category, modern_portfolio_theory_applied) %>%
+      table()
+    
+    if(min(dim(experience_table)) > 1) {
+      chi_experience <- chisq.test(experience_table)
+      print("Chi-square test for experience level differences:")
+      print(paste("χ² =", round(chi_experience$statistic, 2),
+                  ", p =", format(chi_experience$p.value, scientific = TRUE)))
+    }
+  }
+  
+  # Correlation with continuous experience
+  cor_experience <- cor.test(df_experience$modern_portfolio_theory_applied, 
+                             df_experience$experience_years)
+  
+  print("MPT application × Experience years correlation:")
+  print(paste("r =", round(cor_experience$estimate, 3)))
+  print(paste("p-value:", format(cor_experience$p.value, scientific = TRUE)))
+}
+
+# Optimization method breakdown
+if(!all(is.na(df$optimization_method))) {
+  optimization_breakdown <- df %>%
+    filter(!is.na(optimization_method), modern_portfolio_theory_applied == 1) %>%
+    group_by(optimization_method) %>%
+    summarise(
+      n = n(),
+      percentage = round(n() / sum(df$modern_portfolio_theory_applied == 1, na.rm = TRUE) * 100, 1),
+      .groups = "drop"
+    ) %>%
+    filter(n >= 5) %>%
+    arrange(desc(percentage))
+  
+  print("Optimization methods among MPT users (n ≥ 5):")
+  print(optimization_breakdown)
+}
+
+# Risk-adjusted returns analysis
+if(sum(!is.na(df$risk_adjusted_returns)) > 50) {
+  returns_comparison <- df %>%
+    filter(!is.na(risk_adjusted_returns)) %>%
+    mutate(
+      mpt_status = ifelse(modern_portfolio_theory_applied == 1, 
+                         "MPT Applied", "MPT Not Applied")
+    ) %>%
+    group_by(mpt_status) %>%
+    summarise(
+      n = n(),
+      mean_returns = round(mean(risk_adjusted_returns), 2),
+      sd_returns = round(sd(risk_adjusted_returns), 2),
+      median_returns = round(median(risk_adjusted_returns), 2),
+      .groups = "drop"
     )
   
-  aum_analysis <- df_aum %>%
-    group_by(aum_category) %>%
-    summarise(
-      n = n(),
-      mpt_count = sum(modern_portfolio_theory_application),
-      proportion = round(mean(modern_portfolio_theory_application) * 100, 1),
-      .groups = "drop"
-    ) %>%
-    filter(n >= 20) %>%
-    arrange(proportion)
+  print("Risk-adjusted returns by MPT application:")
+  print(returns_comparison)
   
-  print("MPT usage by AUM category (n ≥ 20):")
-  print(aum_analysis)
-  
-  # Trend test for AUM
-  if(nrow(aum_analysis) > 2) {
-    aum_trend <- cor.test(df_aum$assets_under_management,
-                          df_aum$modern_portfolio_theory_application,
-                          method = "spearman")
-    print("AUM size trend test (Spearman):")
-    print(paste("ρ =", round(aum_trend$estimate, 3)))
-    print(paste("p-value:", format(aum_trend$p.value, scientific = TRUE)))
+  # t-test for returns difference
+  if(nrow(returns_comparison) == 2) {
+    mpt_returns <- df$risk_adjusted_returns[df$modern_portfolio_theory_applied == 1 & 
+                                           !is.na(df$risk_adjusted_returns)]
+    no_mpt_returns <- df$risk_adjusted_returns[df$modern_portfolio_theory_applied == 0 & 
+                                              !is.na(df$risk_adjusted_returns)]
+    
+    if(length(mpt_returns) >= 20 && length(no_mpt_returns) >= 20) {
+      t_test_returns <- t.test(mpt_returns, no_mpt_returns)
+      
+      print("Risk-adjusted returns comparison (t-test):")
+      print(paste("t =", round(t_test_returns$statistic, 2)))
+      print(paste("df =", round(t_test_returns$parameter, 1)))
+      print(paste("p-value:", format(t_test_returns$p.value, scientific = TRUE)))
+      print(paste("Mean difference:", round(diff(t_test_returns$estimate), 2)))
+      print(paste("95% CI: [", round(t_test_returns$conf.int[1], 2), ", ",
+                  round(t_test_returns$conf.int[2], 2), "]", sep=""))
+      
+      # Cohen's d for effect size
+      pooled_sd <- sqrt(((length(mpt_returns) - 1) * var(mpt_returns) + 
+                        (length(no_mpt_returns) - 1) * var(no_mpt_returns)) / 
+                       (length(mpt_returns) + length(no_mpt_returns) - 2))
+      cohens_d <- (mean(mpt_returns) - mean(no_mpt_returns)) / pooled_sd
+      print(paste("Cohen's d =", round(cohens_d, 3)))
+    }
   }
 }
 
-# Portfolio size analysis
-if(sum(!is.na(df$portfolio_size)) > 50) {
-  portfolio_analysis <- df %>%
-    filter(!is.na(portfolio_size)) %>%
+# Combined analysis: Stakeholder and portfolio size
+if(sum(!is.na(df$portfolio_size)) > 100) {
+  combined_analysis <- df %>%
+    filter(!is.na(portfolio_size), !is.na(stakeholder)) %>%
     mutate(
       portfolio_category = case_when(
-        portfolio_size <= 10 ~ "Small (≤10)",
-        portfolio_size <= 50 ~ "Medium (11-50)",
-        portfolio_size <= 100 ~ "Large (51-100)",
-        portfolio_size > 100 ~ "Very Large (>100)"
+        portfolio_size <= 10 ~ "Small",
+        portfolio_size <= 50 ~ "Medium",
+        portfolio_size > 50 ~ "Large"
       )
     ) %>%
-    group_by(portfolio_category) %>%
+    group_by(stakeholder, portfolio_category) %>%
     summarise(
       n = n(),
-      mpt_count = sum(modern_portfolio_theory_application),
-      proportion = round(mean(modern_portfolio_theory_application) * 100, 1),
+      mpt_count = sum(modern_portfolio_theory_applied),
+      proportion = round(mean(modern_portfolio_theory_applied) * 100, 1),
       .groups = "drop"
     ) %>%
-    filter(n >= 15)
+    filter(n >= 10) %>%
+    arrange(stakeholder, desc(proportion))
   
-  print("MPT usage by portfolio size (n ≥ 15):")
-  print(portfolio_analysis)
+  if(nrow(combined_analysis) > 0) {
+    print("MPT application by stakeholder and portfolio size (n ≥ 10):")
+    print(combined_analysis)
+  }
 }
 
-# Logistic regression for MPT adoption
-if(sum(!is.na(df$stakeholder)) > 100 & sum(!is.na(df$assets_under_management)) > 100) {
+# Logistic regression analysis
+if(sum(!is.na(df$portfolio_size)) > 100 && sum(!is.na(df$experience_years)) > 100) {
   df_logistic <- df %>%
-    filter(!is.na(stakeholder), !is.na(assets_under_management)) %>%
-    mutate(log_aum = log10(assets_under_management + 1))
+    filter(!is.na(portfolio_size), !is.na(experience_years), !is.na(stakeholder))
   
-  if(nrow(df_logistic) > 100) {
-    logit_model <- glm(modern_portfolio_theory_application ~ stakeholder + log_aum,
+  if(nrow(df_logistic) > 150) {
+    logit_model <- glm(modern_portfolio_theory_applied ~ portfolio_size + experience_years + stakeholder,
                        data = df_logistic, family = binomial)
     
     logit_summary <- summary(logit_model)
-    print("Logistic regression: MPT usage ~ Stakeholder + log(AUM)")
+    print("Logistic regression: MPT application ~ Portfolio size + Experience + Stakeholder")
     print(logit_summary)
     
-    # Odds ratios
+    # Odds ratios with confidence intervals
     odds_ratios <- exp(coef(logit_model))
-    print("Odds ratios:")
-    print(round(odds_ratios, 3))
+    odds_ci <- exp(confint(logit_model))
     
-    # AUM coefficient interpretation
-    aum_coef <- logit_summary$coefficients["log_aum", ]
-    print("AUM effect (log scale):")
-    print(paste("β =", round(aum_coef[1], 3), ", SE =", round(aum_coef[2], 3),
-                ", p =", format(aum_coef[4], scientific = TRUE)))
-    print(paste("10x increase in AUM → OR =", round(exp(aum_coef[1]), 3)))
+    print("Odds ratios with 95% CIs:")
+    for(i in 1:length(odds_ratios)) {
+      print(paste(names(odds_ratios)[i], ": OR =", round(odds_ratios[i], 3),
+                  ", 95% CI [", round(odds_ci[i, 1], 3), ", ", 
+                  round(odds_ci[i, 2], 3), "]", sep=""))
+    }
+    
+    # Model fit statistics
+    print("Model fit statistics:")
+    print(paste("AIC:", round(AIC(logit_model), 1)))
+    print(paste("BIC:", round(BIC(logit_model), 1)))
+    
+    # Pseudo R-squared (McFadden's)
+    null_model <- glm(modern_portfolio_theory_applied ~ 1, 
+                     data = df_logistic, family = binomial)
+    mcfadden_r2 <- 1 - (logit_model$deviance / null_model$deviance)
+    print(paste("McFadden's pseudo R² =", round(mcfadden_r2, 3)))
   }
 }
 
-# Comparison with alternative portfolio methods
-alt_methods <- c("black_litterman", "risk_parity", "factor_based", "equal_weight")
-if(all(alt_methods %in% names(df))) {
-  method_comparison <- data.frame(
-    method = c("Modern Portfolio Theory", "Black-Litterman", "Risk Parity", 
-               "Factor-Based", "Equal Weight"),
-    usage_rate = c(
-      mean(df$modern_portfolio_theory_application, na.rm = TRUE),
-      mean(df$black_litterman, na.rm = TRUE),
-      mean(df$risk_parity, na.rm = TRUE),
-      mean(df$factor_based, na.rm = TRUE),
-      mean(df$equal_weight, na.rm = TRUE)
-    ) * 100
-  ) %>%
-    arrange(desc(usage_rate))
-  
-  print("Portfolio optimization method comparison:")
-  print(method_comparison)
-}
-
-# Effectiveness rating analysis
-if("mpt_effectiveness_rating" %in% names(df)) {
-  effectiveness <- df %>%
-    filter(modern_portfolio_theory_application == 1,
-           !is.na(mpt_effectiveness_rating)) %>%
+# Trend analysis over portfolio size ranges
+if(sum(!is.na(df$portfolio_size)) > 50) {
+  portfolio_trend <- df %>%
+    filter(!is.na(portfolio_size)) %>%
+    mutate(portfolio_decile = ntile(portfolio_size, 10)) %>%
+    group_by(portfolio_decile) %>%
     summarise(
       n = n(),
-      mean_effectiveness = round(mean(mpt_effectiveness_rating), 2),
-      sd_effectiveness = round(sd(mpt_effectiveness_rating), 2),
-      median_effectiveness = median(mpt_effectiveness_rating)
-    )
+      mean_portfolio_size = round(mean(portfolio_size), 1),
+      mpt_rate = round(mean(modern_portfolio_theory_applied) * 100, 1),
+      .groups = "drop"
+    ) %>%
+    filter(n >= 5) %>%
+    arrange(portfolio_decile)
   
-  print("MPT effectiveness rating (among users):")
-  print(effectiveness)
+  print("MPT application trend by portfolio size deciles:")
+  print(portfolio_trend)
+  
+  # Trend test (Cochran-Armitage)
+  if(nrow(portfolio_trend) >= 3) {
+    trend_test <- cor.test(portfolio_trend$portfolio_decile, 
+                          portfolio_trend$mpt_rate,
+                          method = "spearman")
+    
+    print("Portfolio size trend test (Spearman):")
+    print(paste("ρ =", round(trend_test$estimate, 3)))
+    print(paste("p-value:", format(trend_test$p.value, scientific = TRUE)))
+  }
 }
 
-# Summary
+# Summary of key findings
 print("Summary of Modern Portfolio Theory application:")
-print(paste("Overall usage rate:", round(prop_mpt * 100, 1), "%"))
+print(paste("Overall application rate:", round(prop_mpt * 100, 1), "%"))
 print(paste("95% Wilson CI: [", round(ci_wilson[,"lwr.ci"] * 100, 1), "%, ", 
             round(ci_wilson[,"upr.ci"] * 100, 1), "%]", sep=""))
-print("Higher usage among institutional investors as expected")
 
-# Expected: 67% (95% CI [63.7%, 70.2%]) with higher usage among institutional investors
+# Expected: 67% (95% CI [63.7%, 70.2%])
