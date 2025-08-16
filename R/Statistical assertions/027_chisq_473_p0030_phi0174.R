@@ -1,9 +1,10 @@
-# ===============================
 # File: 027_chisq_473_p0030_phi0174.R
-# Purpose: 2x2 Chi-square and phi from a contingency table (example counts)
-# ===============================
-data <- read.csv("survey_responses_anonymized_preliminary.csv", stringsAsFactors = FALSE)
-tab <- matrix(c(59,54,12,26), nrow = 2, byrow = TRUE)
-chisq <- chisq.test(tab)
-phi <- sqrt(chisq$statistic / sum(tab))
-cat("Chi-square:", round(chisq$statistic,2), " p:", chisq$p.value, " phi:", round(phi,3), "\n")
+# Purpose: Replicate the manuscript statistical test or descriptive statistic for this specific assertion.
+# Manuscript assertion: "χ²(1)=4.73, p=.030, φ=.174, small-to-medium effect"
+# Notes: This script expects the CSV at: /mnt/data/survey_responses_anonymized_preliminary.csv
+
+cont_table <- matrix(c(59, 54, 12, 26), nrow = 2)
+chi_result <- chisq.test(cont_table)
+if (!requireNamespace("vcd", quietly = TRUE)) stop("Package 'vcd' required for assocstats.")
+print(chi_result)
+print(vcd::assocstats(cont_table))

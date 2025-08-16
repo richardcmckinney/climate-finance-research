@@ -1,9 +1,11 @@
-# ===============================
 # File: 005_vc_firms_113_86pct.R
-# Purpose: Count & % of VCs in analytic sample
-# ===============================
-data <- read.csv("survey_responses_anonymized_preliminary.csv", stringsAsFactors = FALSE)
-analytic <- subset(data, Status == "IP Address" & as.numeric(Progress) >= 10)
-vc_n <- sum(analytic$Q2.1 == "1", na.rm = TRUE)
-vc_pct <- 100 * vc_n / nrow(analytic)
-cat("VC count:", vc_n, " VC %:", round(vc_pct, 1), "\n")
+# Purpose: Replicate the manuscript statistical test or descriptive statistic for this specific assertion.
+# Manuscript assertion: "venture capital firms (n=113, 8.6%)"
+# Notes: This script expects the CSV at: /mnt/data/survey_responses_anonymized_preliminary.csv
+
+data <- read.csv("/mnt/data/survey_responses_anonymized_preliminary.csv", stringsAsFactors = FALSE, check.names = FALSE)
+if (!("Status" %in% names(data))) stop("Column 'Status' not found.")
+data_clean <- subset(data, Status == "IP Address" & suppressWarnings(as.numeric(Progress)) >= 10)
+vc_count <- sum(data$Q2.1 == "1" & data$Status == "IP Address", na.rm = TRUE)
+vc_pct <- (vc_count / nrow(data_clean)) * 100
+cat("VC count:", vc_count, " Percent:", round(vc_pct,2), "\n")

@@ -1,9 +1,8 @@
-# ===============================
 # File: 041_ent_market_readiness_78pct_ci728_826.R
-# Purpose: Entrepreneur market readiness (Q5.11 text)
-# ===============================
-data <- read.csv("survey_responses_anonymized_preliminary.csv", stringsAsFactors = FALSE)
-ent <- subset(data, Status=="IP Address" & as.numeric(Progress)>=10 & Q2.1=="3")
-k <- sum(grepl("market", ent$Q5.11, ignore.case=TRUE), na.rm=TRUE)
-n <- sum(!is.na(ent$Q5.11))
-print(prop.test(k, n, conf.level = 0.95))
+# Purpose: Replicate the manuscript statistical test or descriptive statistic for this specific assertion.
+# Manuscript assertion: "entrepreneurs (78%, 95% CI [72.8%, 82.6%])"
+# Notes: This script expects the CSV at: /mnt/data/survey_responses_anonymized_preliminary.csv
+
+ent_market_count <- sum(grepl("market", data$Q5.11[data$Q2.1 == "3"], ignore.case = TRUE), na.rm = TRUE)
+ent_total <- sum(data$Q2.1 == "3" & !is.na(data$Q5.11))
+print(prop.test(ent_market_count, ent_total, conf.level = 0.95))

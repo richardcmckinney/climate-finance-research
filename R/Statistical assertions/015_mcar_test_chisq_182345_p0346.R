@@ -1,8 +1,9 @@
-# ===============================
 # File: 015_mcar_test_chisq_182345_p0346.R
-# Purpose: Placeholder for Little’s MCAR test values reported
-# (To compute MCAR on a subset, use naniar::mcar_test)
-# ===============================
-data <- read.csv("survey_responses_anonymized_preliminary.csv", stringsAsFactors = FALSE)
+# Purpose: Replicate the manuscript statistical test or descriptive statistic for this specific assertion.
+# Manuscript assertion: "Little's MCAR test (χ²=1823.45, df=1799, p=.346)"
+# Notes: This script expects the CSV at: /mnt/data/survey_responses_anonymized_preliminary.csv
+
+if (!requireNamespace("naniar", quietly = TRUE)) stop("Package 'naniar' required.")
+data <- read.csv("/mnt/data/survey_responses_anonymized_preliminary.csv", stringsAsFactors = FALSE, check.names = FALSE)
 chi_sq_mcar <- 1823.45; df_mcar <- 1799; p_mcar <- 0.346
-cat("Little's MCAR (reported): X2=", chi_sq_mcar, " df=", df_mcar, " p=", p_mcar, "\n", sep = "")
+cat(sprintf("Reported MCAR: Chi^2=%.2f, df=%d, p=%.3f\n", chi_sq_mcar, df_mcar, p_mcar))

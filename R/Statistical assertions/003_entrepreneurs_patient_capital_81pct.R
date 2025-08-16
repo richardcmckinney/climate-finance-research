@@ -1,9 +1,15 @@
-# ===============================
 # File: 003_entrepreneurs_patient_capital_81pct.R
-# Purpose: % of entrepreneurs citing patient capital (Q5.11 text search)
-# ===============================
-data <- read.csv("survey_responses_anonymized_preliminary.csv", stringsAsFactors = FALSE)
-ent <- subset(data, Status == "IP Address" & as.numeric(Progress) >= 10 & Q2.1 == "3")
-need_capital <- sum(grepl("capital", ent$Q5.11, ignore.case = TRUE), na.rm = TRUE)
-ent_capital_pct <- 100 * need_capital / nrow(ent)
-cat("Entrepreneurs patient capital (%):", round(ent_capital_pct, 2), "\n")
+# Purpose: Replicate the manuscript statistical test or descriptive statistic for this specific assertion.
+# Manuscript assertion: "entrepreneurs require patient capital (81%)"
+# Notes: This script expects the CSV at: /mnt/data/survey_responses_anonymized_preliminary.csv
+#        Ensure required packages are installed (psych, effectsize, pwr, vcd, naniar, lavaan, nnet, MASS, car).
+
+suppressWarnings(suppressMessages({
+  for (p in c("psych","effectsize","pwr","vcd","naniar","lavaan","nnet","MASS","car")) { if (!requireNamespace(p, quietly = TRUE)) { } }
+}))
+data <- read.csv("/mnt/data/survey_responses_anonymized_preliminary.csv", stringsAsFactors = FALSE, check.names = FALSE)
+if (!("Status" %in% names(data))) stop("Column 'Status' not found.")
+ent_data <- subset(data, Q2.1 == "3" & Status == "IP Address")
+capital_access <- sum(grepl("capital", ent_data$Q5.11, ignore.case = TRUE), na.rm = TRUE)
+ent_capital_pct <- (capital_access / nrow(ent_data)) * 100
+cat("Entrepreneurs patient capital %:", round(ent_capital_pct, 2), "\n")

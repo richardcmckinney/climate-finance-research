@@ -1,9 +1,12 @@
-# ===============================
 # File: 029_mean_diff_123_p0018.R
-# Purpose: Tukey mean difference between VC (1) and Government (2) on Q3.6_1
-# ===============================
-data <- read.csv("survey_responses_anonymized_preliminary.csv", stringsAsFactors = FALSE)
-df <- subset(data, Status=="IP Address" & as.numeric(Progress)>=10, select=c(Q2.1,Q3.6_1))
-df$Q3.6_1 <- as.numeric(df$Q3.6_1); df <- na.omit(df)
-fit <- aov(Q3.6_1 ~ factor(Q2.1), data=df)
-print(TukeyHSD(fit)$`factor(Q2.1)`["1-2", , drop=FALSE])
+# Purpose: Replicate the manuscript statistical test or descriptive statistic for this specific assertion.
+# Manuscript assertion: "mean difference=1.23, p=.018"
+# Notes: This script expects the CSV at: /mnt/data/survey_responses_anonymized_preliminary.csv
+
+data <- read.csv("/mnt/data/survey_responses_anonymized_preliminary.csv", stringsAsFactors = FALSE, check.names = FALSE)
+tech_risk_data <- na.omit(data.frame(
+  stakeholder = factor(data$Q2.1),
+  tech_risk = suppressWarnings(as.numeric(data$Q3.6_1))
+))
+aov_result <- aov(tech_risk ~ stakeholder, data = tech_risk_data)
+print(TukeyHSD(aov_result)$stakeholder["1-2", ])

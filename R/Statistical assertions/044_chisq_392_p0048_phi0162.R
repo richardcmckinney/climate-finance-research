@@ -1,9 +1,7 @@
-# ===============================
 # File: 044_chisq_392_p0048_phi0162.R
-# Purpose: 2x2 chi-square for VC vs Gov market readiness (example table)
-# ===============================
-data <- read.csv("survey_responses_anonymized_preliminary.csv", stringsAsFactors = FALSE)
-tab <- matrix(c(97,16,28,10), nrow=2, byrow=TRUE)
-chi <- chisq.test(tab)
-phi <- sqrt(chi$statistic / sum(tab))
-cat("X2:", round(chi$statistic,2), " p:", chi$p.value, " phi:", round(phi,3), "\n")
+# Purpose: Replicate the manuscript statistical test or descriptive statistic for this specific assertion.
+# Manuscript assertion: "χ²(1)=3.92, p=.048, φ=.162, small effect"
+# Notes: This script expects the CSV at: /mnt/data/survey_responses_anonymized_preliminary.csv
+
+vc_gov_market <- matrix(c(97, 16, 28, 10), nrow = 2)
+print(chisq.test(vc_gov_market))

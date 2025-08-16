@@ -1,9 +1,8 @@
-# ===============================
 # File: 040_gov_market_readiness_73pct_ci575_850.R
-# Purpose: Government-only market readiness (Q4.7 text)
-# ===============================
-data <- read.csv("survey_responses_anonymized_preliminary.csv", stringsAsFactors = FALSE)
-gov <- subset(data, Status=="IP Address" & as.numeric(Progress)>=10 & Q2.1=="2")
-k <- sum(grepl("market", gov$Q4.7, ignore.case=TRUE), na.rm=TRUE)
-n <- sum(!is.na(gov$Q4.7))
-print(prop.test(k, n, conf.level = 0.95))
+# Purpose: Replicate the manuscript statistical test or descriptive statistic for this specific assertion.
+# Manuscript assertion: "government agencies (73%, 95% CI [57.5%, 85.0%])"
+# Notes: This script expects the CSV at: /mnt/data/survey_responses_anonymized_preliminary.csv
+
+gov_market_count <- sum(grepl("market", data$Q4.7[data$Q2.1 == "2"], ignore.case = TRUE), na.rm = TRUE)
+gov_total <- sum(data$Q2.1 == "2" & !is.na(data$Q4.7))
+print(prop.test(gov_market_count, gov_total, conf.level = 0.95))
