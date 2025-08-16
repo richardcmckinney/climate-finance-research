@@ -1,3 +1,4 @@
+if (interactive() && file.exists("scripts/renv_sync.R")) { source("scripts/renv_sync.R"); try(renv_sync(), silent = TRUE) }
 #!/usr/bin/env Rscript
 # run_all.R - Pipeline Runner v6.0
 # Purpose: Execute the complete data processing and analysis pipeline
