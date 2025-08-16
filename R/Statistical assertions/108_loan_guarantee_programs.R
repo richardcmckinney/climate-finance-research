@@ -1,6 +1,6 @@
 # =============== Global Setup & Variable Mapping =================
 # Statistical Assertion 108: "Loan guarantee programs: default rate (4.8%, 95% CI [3.2%, 6.4%])"
-# Purpose: Analyze default rates in loan guarantee programs
+# Purpose: 
 
 library(tidyverse)
 library(janitor)

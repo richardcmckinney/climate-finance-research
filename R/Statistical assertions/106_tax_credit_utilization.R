@@ -1,6 +1,6 @@
 # =============== Global Setup & Variable Mapping =================
 # Statistical Assertion 106: "Tax credit utilization: effectiveness rating (M = 3.73, SD = 0.91)"
-# Purpose: Analyze tax credit utilization effectiveness ratings
+# Purpose: 
 
 library(tidyverse)
 library(janitor)
