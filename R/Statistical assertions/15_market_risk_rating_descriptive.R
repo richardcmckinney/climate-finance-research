@@ -33,4 +33,4 @@ library(multcomp)
 tukey_result <- TukeyHSD(aov_model)
 print(tukey_result)
 
-# Expected: F(7,498)=18.92, p<.001, η²=.210
+# Expected: F(7,498)=18.92, p<.001, η²=.210 

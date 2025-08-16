@@ -26,4 +26,4 @@ print(paste("Correlation: r =", round(cor_result$estimate, 3)))
 print(paste("95% CI: [", round(cor_result$conf.int[1], 3), ", ",
             round(cor_result$conf.int[2], 3), "]"))
 
-# Expected: r=.685, p<.001, 95% CI [.651, .716]
+# Expected: r=.685, p<.001, 95% CI [.651, .716] 

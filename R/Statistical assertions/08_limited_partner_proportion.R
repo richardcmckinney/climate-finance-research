@@ -23,4 +23,4 @@ cor_result <- cor.test(df$tech_risk_rating, df$market_risk_rating,
                        method = "pearson", use = "complete.obs")
 print(cor_result)
 
-# Expected: r=.342, p<.001, 95% CI [.261, .419]
+# Expected: r=.342, p<.001, 95% CI [.261, .419] 

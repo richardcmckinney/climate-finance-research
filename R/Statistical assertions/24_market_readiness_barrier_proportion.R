@@ -36,4 +36,4 @@ cor3 <- cor.test(df$support_strategic_counsel, df$preference_syndication, use = 
 print(paste("Strategic-Syndication correlation: r =", round(cor3$estimate, 3),
             ", p =", format(cor3$p.value, scientific = FALSE)))
 
-# Expected: Networking-Partnership r=.449, Mentorship-Coinvest r=.374, Strategic-Syndication r=.322
+# Expected: Networking-Partnership r=.449, Mentorship-Coinvest r=.374, Strategic-Syndication r=.322 

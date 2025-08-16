@@ -22,4 +22,3 @@ print(paste("Technology module completion: n =", n_tech_complete,
             "(", round(completion_rate, 1), "% )"))
 
 # Expected: n=862 (66%) completion rate for technology module
-#

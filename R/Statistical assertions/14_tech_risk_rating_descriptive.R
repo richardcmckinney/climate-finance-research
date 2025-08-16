@@ -33,4 +33,4 @@ for(grp in groups) {
   print(paste(grp, ": M =", round(mean_val, 2), ", SD =", round(sd_val, 2), ", n =", n_grp))
 }
 
-# Expected: Philanthropic M=2.81 (SD=1.22), ESG M=3.76 (SD=1.31), VC M=5.31 (SD=1.19)
+# Expected: Philanthropic M=2.81 (SD=1.22), ESG M=3.76 (SD=1.31), VC M=5.31 (SD=1.19) 

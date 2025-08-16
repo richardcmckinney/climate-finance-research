@@ -29,4 +29,4 @@ prop_reg_support <- n_providing_reg / n_investors * 100
 print(paste("Investors providing regulatory navigation support:", 
             round(prop_reg_support, 1), "%"))
 
-# Expected: 23%
+# Expected: 23% of investors report providing regulatory navigation support

@@ -31,4 +31,4 @@ prop_critical <- n_critical / n_vc
 ci <- BinomCI(n_critical, n_vc, conf.level = 0.95, method = "wilson")
 print(paste("VCs rating tech risk critical:", round(prop_critical * 100, 1), "%"))
 print(paste("95% CI: [", round(ci[,"lwr.ci"] * 100, 1), "%, ", round(ci[,"upr.ci"] * 100, 1), "%]", sep=""))
-# Expected: 52% (95% CI [42.8%, 61.1%])
+# Expected: 52% (95% CI [42.8%, 61.1%]) 

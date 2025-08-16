@@ -33,4 +33,4 @@ for(grp in groups) {
               round(ci[,"upr.ci"] * 100, 1), "%])", sep=""))
 }
 
-# Expected: VCs 86% [78.9%, 91.5%], Govt 73% [57.5%, 85.0%], Entrepreneurs 78% [72.8%, 82.6%]
+# Expected: VCs 86% [78.9%, 91.5%], Govt 73% [57.5%, 85.0%], Entrepreneurs 78% [72.8%, 82.6%] 

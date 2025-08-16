@@ -4,7 +4,7 @@
 
 library(tidyverse)
 library(janitor)
-# library(BaylorEdPsych)  # removed; package archived and unused
+library(BaylorEdPsych)
 
 raw <- read.csv("survey_responses_anonymized_preliminary.csv") %>% clean_names()
 
@@ -21,4 +21,4 @@ df <- raw %>%
 mcar_result <- LittleMCAR(df)
 print(mcar_result)
 
-# Expected: χ²=1823.45, df=1799, p=.346
+# Expected: χ²=1823.45, df=1799, p=.346 

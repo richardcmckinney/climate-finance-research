@@ -41,4 +41,4 @@ print(paste("North America regulatory barriers:", round(prop_na * 100, 1), "%",
             "(95% CI [", round(ci_na[,"lwr.ci"] * 100, 1), "%, ",
             round(ci_na[,"upr.ci"] * 100, 1), "%])"))
 
-# Expected: Europe 86% [81.7%, 89.5%], North America 78% [73.2%, 82.3%]
+# Expected: Europe 86% [81.7%, 89.5%], North America 78% [73.2%, 82.3%] 

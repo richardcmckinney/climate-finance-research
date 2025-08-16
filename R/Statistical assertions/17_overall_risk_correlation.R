@@ -34,4 +34,4 @@ print(paste("Total variance explained by 3 factors:", round(total_var, 1), "%"))
 print("Factor loadings:")
 print(pca_result$loadings)
 
-# Expected: 62.3% total variance, with specific loadings as stated
+# Expected: 62.3% total variance, with specific loadings as stated 

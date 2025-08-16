@@ -37,4 +37,4 @@ for(grp in groups) {
   }
 }
 
-# Expected: VC r=.451, Govt r=.312, ESG r=.248, Philanthropic r=.156
+# Expected: VC r=.451, Govt r=.312, ESG r=.248, Philanthropic r=.156 

@@ -20,4 +20,4 @@ geo_dist <- df %>%
   mutate(percent = n / sum(n) * 100)
 
 print(geo_dist)
-# Expected: North America=34%, Europe=32%, Asia=18%, Other=16%
+# Expected: North America=34%, Europe=32%, Asia=18%, Other=16% 

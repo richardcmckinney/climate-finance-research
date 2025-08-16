@@ -31,4 +31,4 @@ n_obs <- nrow(risk_data)
 bartlett_result <- cortest.bartlett(cor_matrix, n = n_obs)
 print(bartlett_result)
 
-# Expected: KMO = .847, Bartlett's χ²(45)=2341.67, p<.001
+# Expected: KMO = .847, Bartlett's χ²(45)=2341.67, p<.001 

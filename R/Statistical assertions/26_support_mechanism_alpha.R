@@ -1,5 +1,5 @@
 # =============== Global Setup & Variable Mapping =================
-# Statistical Assertion: "Support mechanism effectiveness (α = .86)"
+# Statistical Assertion 26: "Support mechanism effectiveness (α = .86)"
 # Purpose: Calculate internal consistency reliability for support mechanism items
 
 library(tidyverse)

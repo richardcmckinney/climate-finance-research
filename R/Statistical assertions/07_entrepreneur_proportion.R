@@ -28,4 +28,4 @@ summary(aov_model)
 eta_sq <- eta_squared(aov_model)
 print(eta_sq)
 
-# Expected: F(7,651)=3.84, p<.001, η²=.040
+# Expected: F(7,651)=3.84, p<.001, η²=.040 

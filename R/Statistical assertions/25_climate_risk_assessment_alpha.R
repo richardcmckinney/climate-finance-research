@@ -1,5 +1,5 @@
 # =============== Global Setup & Variable Mapping =================
-# Statistical Assertion: "Climate risk assessment (α = .91)"
+# Statistical Assertion 25: "Climate risk assessment (α = .91)"
 # Purpose: Calculate internal consistency reliability for climate risk assessment items
 
 library(tidyverse)

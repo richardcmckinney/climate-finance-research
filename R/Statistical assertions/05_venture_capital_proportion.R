@@ -29,4 +29,4 @@ prop_critical <- n_critical / n_gov
 ci <- BinomCI(n_critical, n_gov, conf.level = 0.95, method = "wilson")
 print(paste("Government rating tech risk critical:", round(prop_critical * 100, 1), "%"))
 print(paste("95% CI: [", round(ci[,"lwr.ci"] * 100, 1), "%, ", round(ci[,"upr.ci"] * 100, 1), "%]", sep=""))
-# Expected: 31% (95% CI [18.5%, 46.7%])
+# Expected: 31% (95% CI [18.5%, 46.7%]) 

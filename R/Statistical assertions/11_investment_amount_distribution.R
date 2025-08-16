@@ -29,4 +29,4 @@ ci <- BinomCI(n_intl_critical, n_vc, conf.level = 0.95, method = "wilson")
 print(paste("VCs rating international scalability critical:", round(prop_intl * 100, 1), "%"))
 print(paste("95% CI: [", round(ci[,"lwr.ci"] * 100, 1), "%, ", round(ci[,"upr.ci"] * 100, 1), "%]", sep=""))
 
-# Expected: 71% (95% CI [62.4%, 78.6%])
+# Expected: 71% (95% CI [62.4%, 78.6%]) 

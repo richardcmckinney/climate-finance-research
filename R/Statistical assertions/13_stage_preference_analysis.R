@@ -31,4 +31,4 @@ print(chi_result)
 assoc_stats <- assocstats(cont_table)
 print(assoc_stats)
 
-# Expected: χ²(1)=7.84, p=.005, φ=.089
+# Expected: χ²(1)=7.84, p=.005, φ=.089 

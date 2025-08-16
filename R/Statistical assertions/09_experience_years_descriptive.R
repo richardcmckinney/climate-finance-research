@@ -23,4 +23,4 @@ ci <- BinomCI(n_market_critical, n_total, conf.level = 0.95, method = "wilson")
 print(paste("Market readiness as barrier:", round(prop_market * 100, 1), "%"))
 print(paste("95% CI: [", round(ci[,"lwr.ci"] * 100, 1), "%, ", round(ci[,"upr.ci"] * 100, 1), "%]", sep=""))
 
-# Expected: 81% (95% CI [78.9%, 83.0%])
+# Expected: 81% (95% CI [78.9%, 83.0%]) 

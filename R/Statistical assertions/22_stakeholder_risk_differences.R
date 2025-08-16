@@ -22,4 +22,4 @@ df <- raw %>%
 alpha_result <- alpha(df)
 print(paste("Cronbach's alpha for barrier perceptions:", round(alpha_result$total$raw_alpha, 2)))
 
-# Expected: α = .84
+# Expected: α = .84 
