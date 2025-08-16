@@ -1,30 +1,37 @@
-# File: 006_government_funding_agencies_38_29pct.R
-# Purpose: Replicate the manuscript statistical test or descriptive statistic for this specific assertion.
-# Manuscript assertion: "government funding agencies (n=38, 2.9%)"
-# Notes: This script expects the CSV at: /mnt/data/survey_responses_anonymized_preliminary.csv
-#        Ensure required packages are installed (psych, effectsize, pwr, vcd, naniar, lavaan, nnet, MASS, car).
+# =============== Global Setup & Variable Mapping =================
+# Statistical Assertion: "The difference between VCs and government agencies was statistically significant (χ²(1)=4.73, p=.030, φ=.174)"
+# Purpose: Compare VCs vs Government on technology risk criticality using chi-square test
 
-# ---- Setup ----
-suppressWarnings(suppressMessages({
-  required_pkgs <- c("psych","effectsize","pwr","vcd","naniar","lavaan","nnet","MASS","car")
-  for (p in required_pkgs) { if (!requireNamespace(p, quietly = TRUE)) { message(sprintf("Package '%s' not installed; attempting to proceed if not needed in this script.", p)) } }
-}))
+library(tidyverse)
+library(janitor)
+library(vcd)
 
-# Load data (literal path to the attached file)
-data <- tryCatch({
-  read.csv("/mnt/data/survey_responses_anonymized_preliminary.csv", stringsAsFactors = FALSE, check.names = FALSE)
-}, error = function(e) {
-  stop("Could not read CSV at /mnt/data/survey_responses_anonymized_preliminary.csv: ", e)
-})
+raw <- read.csv("survey_responses_anonymized_preliminary.csv") %>% clean_names()
 
-# Convenience: treat common columns
-# Ensure key columns exist (Status, Progress)
-if (!("Status" %in% names(data))) stop("Column 'Status' not found.")
-if (!("Progress" %in% names(data))) stop("Column 'Progress' not found.")
+# Variable mapping
+COL_STAKEHOLDER <- "stakeholder"
+COL_TECH_RISK_CRIT <- "tech_risk_critical"
 
-# Clean subset similar to manuscript logic
-data_clean <- subset(data, Status == "IP Address" & suppressWarnings(as.numeric(Progress)) >= 10)
+df <- raw %>%
+  filter(status == "IP Address", as.numeric(progress) >= 10) %>%
+  mutate(
+    stakeholder = factor(stakeholder),
+    tech_risk_critical = as.integer(tech_risk_critical)
+  )
 
-gov_count <- sum(data$Q2.1 == "2" & data$Status == "IP Address", na.rm = TRUE)
-gov_pct <- (gov_count / nrow(data_clean)) * 100
-cat("Government count:", gov_count, " Percent:", round(gov_pct,2), "\n")
+# Filter for VCs and Government only
+vc_gov_data <- df %>% 
+  filter(stakeholder %in% c("Venture Capital", "Government Agency"))
+
+# Create contingency table
+cont_table <- table(vc_gov_data$stakeholder, vc_gov_data$tech_risk_critical)
+
+# Chi-square test
+chi_result <- chisq.test(cont_table)
+print(chi_result)
+
+# Effect size (Cramér's V / phi for 2x2 table)
+assoc_stats <- assocstats(cont_table)
+print(assoc_stats)
+
+# Expected: χ²(1)=4.73, p=.030, φ=.174

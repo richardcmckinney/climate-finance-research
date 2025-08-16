@@ -1,30 +1,31 @@
-# File: 007_entrepreneurs_263_201pct.R
-# Purpose: Replicate the manuscript statistical test or descriptive statistic for this specific assertion.
-# Manuscript assertion: "entrepreneurs (n=263, 20.1%)"
-# Notes: This script expects the CSV at: /mnt/data/survey_responses_anonymized_preliminary.csv
-#        Ensure required packages are installed (psych, effectsize, pwr, vcd, naniar, lavaan, nnet, MASS, car).
+# =============== Global Setup & Variable Mapping =================
+# Statistical Assertion: "One-way ANOVA revealed significant differences across groups (F(7,651)=3.84, p<.001, η²=.040)"
+# Purpose: Test for differences in technology risk ratings across all stakeholder groups
 
-# ---- Setup ----
-suppressWarnings(suppressMessages({
-  required_pkgs <- c("psych","effectsize","pwr","vcd","naniar","lavaan","nnet","MASS","car")
-  for (p in required_pkgs) { if (!requireNamespace(p, quietly = TRUE)) { message(sprintf("Package '%s' not installed; attempting to proceed if not needed in this script.", p)) } }
-}))
+library(tidyverse)
+library(janitor)
+library(effectsize)
 
-# Load data (literal path to the attached file)
-data <- tryCatch({
-  read.csv("/mnt/data/survey_responses_anonymized_preliminary.csv", stringsAsFactors = FALSE, check.names = FALSE)
-}, error = function(e) {
-  stop("Could not read CSV at /mnt/data/survey_responses_anonymized_preliminary.csv: ", e)
-})
+raw <- read.csv("survey_responses_anonymized_preliminary.csv") %>% clean_names()
 
-# Convenience: treat common columns
-# Ensure key columns exist (Status, Progress)
-if (!("Status" %in% names(data))) stop("Column 'Status' not found.")
-if (!("Progress" %in% names(data))) stop("Column 'Progress' not found.")
+# Variable mapping
+COL_STAKEHOLDER <- "stakeholder"
+COL_TECH_RISK_MEAN <- "tech_risk_rating"  # Continuous 1-7 scale
 
-# Clean subset similar to manuscript logic
-data_clean <- subset(data, Status == "IP Address" & suppressWarnings(as.numeric(Progress)) >= 10)
+df <- raw %>%
+  filter(status == "IP Address", as.numeric(progress) >= 10) %>%
+  mutate(
+    stakeholder = factor(stakeholder),
+    tech_risk_rating = as.numeric(tech_risk_rating)
+  ) %>%
+  filter(!is.na(tech_risk_rating))
 
-ent_count <- sum(data$Q2.1 == "3" & data$Status == "IP Address", na.rm = TRUE)
-ent_pct <- (ent_count / nrow(data_clean)) * 100
-cat("Entrepreneurs count:", ent_count, " Percent:", round(ent_pct,2), "\n")
+# One-way ANOVA
+aov_model <- aov(tech_risk_rating ~ stakeholder, data = df)
+summary(aov_model)
+
+# Effect size
+eta_sq <- eta_squared(aov_model)
+print(eta_sq)
+
+# Expected: F(7,651)=3.84, p<.001, η²=.040

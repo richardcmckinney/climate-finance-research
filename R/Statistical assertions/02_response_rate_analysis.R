@@ -23,4 +23,4 @@ stakeholder_dist <- df %>%
   arrange(desc(n))
 
 print(stakeholder_dist)
-# Expected: VC=113 (8.6%), Govt=38 (2.9%), Entrepreneurs=263 (20.1%), etc.
+# Expected: VC=113 (8.6%), Govt=38 (2.9%), Entrepreneurs=263 (20.1%), etc. 

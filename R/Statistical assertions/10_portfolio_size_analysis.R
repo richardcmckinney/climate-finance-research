@@ -1,30 +1,36 @@
-# File: 010_high_networth_individuals_78_60pct.R
-# Purpose: Replicate the manuscript statistical test or descriptive statistic for this specific assertion.
-# Manuscript assertion: "high net-worth individuals (n=78, 6.0%)"
-# Notes: This script expects the CSV at: /mnt/data/survey_responses_anonymized_preliminary.csv
-#        Ensure required packages are installed (psych, effectsize, pwr, vcd, naniar, lavaan, nnet, MASS, car).
+# =============== Global Setup & Variable Mapping =================
+# Statistical Assertion: "VCs (86%, 95% CI [78.9%, 91.5%]), government agencies (73%, 95% CI [57.5%, 85.0%]), entrepreneurs (78%, 95% CI [72.8%, 82.6%])"
+# Purpose: Calculate market readiness barrier proportions by stakeholder group
 
-# ---- Setup ----
-suppressWarnings(suppressMessages({
-  required_pkgs <- c("psych","effectsize","pwr","vcd","naniar","lavaan","nnet","MASS","car")
-  for (p in required_pkgs) { if (!requireNamespace(p, quietly = TRUE)) { message(sprintf("Package '%s' not installed; attempting to proceed if not needed in this script.", p)) } }
-}))
+library(tidyverse)
+library(janitor)
+library(DescTools)
 
-# Load data (literal path to the attached file)
-data <- tryCatch({
-  read.csv("/mnt/data/survey_responses_anonymized_preliminary.csv", stringsAsFactors = FALSE, check.names = FALSE)
-}, error = function(e) {
-  stop("Could not read CSV at /mnt/data/survey_responses_anonymized_preliminary.csv: ", e)
-})
+raw <- read.csv("survey_responses_anonymized_preliminary.csv") %>% clean_names()
 
-# Convenience: treat common columns
-# Ensure key columns exist (Status, Progress)
-if (!("Status" %in% names(data))) stop("Column 'Status' not found.")
-if (!("Progress" %in% names(data))) stop("Column 'Progress' not found.")
+# Variable mapping
+COL_STAKEHOLDER <- "stakeholder"
+COL_MARKET_READY_CRIT <- "market_readiness_critical"
 
-# Clean subset similar to manuscript logic
-data_clean <- subset(data, Status == "IP Address" & suppressWarnings(as.numeric(Progress)) >= 10)
+df <- raw %>%
+  filter(status == "IP Address", as.numeric(progress) >= 10) %>%
+  mutate(
+    stakeholder = factor(stakeholder),
+    market_readiness_critical = as.integer(market_readiness_critical)
+  )
 
-hnwi_count <- sum(data$Q2.1 == "5" & data$Status == "IP Address", na.rm = TRUE)
-hnwi_pct <- (hnwi_count / nrow(data_clean)) * 100
-cat("HNWI count:", hnwi_count, " Percent:", round(hnwi_pct,2), "\n")
+# Calculate by group
+groups <- c("Venture Capital", "Government Agency", "Entrepreneur")
+for(grp in groups) {
+  grp_data <- df %>% filter(stakeholder == grp)
+  n_grp <- nrow(grp_data)
+  n_critical <- sum(grp_data$market_readiness_critical, na.rm = TRUE)
+  prop <- n_critical / n_grp
+  ci <- BinomCI(n_critical, n_grp, conf.level = 0.95, method = "wilson")
+  
+  print(paste(grp, ": ", round(prop * 100, 1), "% ",
+              "(95% CI [", round(ci[,"lwr.ci"] * 100, 1), "%, ", 
+              round(ci[,"upr.ci"] * 100, 1), "%])", sep=""))
+}
+
+# Expected: VCs 86% [78.9%, 91.5%], Govt 73% [57.5%, 85.0%], Entrepreneurs 78% [72.8%, 82.6%]

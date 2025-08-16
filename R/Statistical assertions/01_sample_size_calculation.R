@@ -19,4 +19,4 @@ df <- raw %>%
 
 n_final <- nrow(df)
 print(paste("Total usable responses:", n_final))
-# Expected: 1307
+# Expected: 1307 provided usable responses

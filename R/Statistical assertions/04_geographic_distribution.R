@@ -1,34 +1,34 @@
-# File: 004_three_factor_climate_risk_623pct_variance.R
-# Purpose: Replicate the manuscript statistical test or descriptive statistic for this specific assertion.
-# Manuscript assertion: "Three-Factor Climate Risk Model... (62.3% variance)"
-# Notes: This script expects the CSV at: /mnt/data/survey_responses_anonymized_preliminary.csv
-#        Ensure required packages are installed (psych, effectsize, pwr, vcd, naniar, lavaan, nnet, MASS, car).
+# =============== Global Setup & Variable Mapping =================
+# Statistical Assertion: "Among VCs, 52% (95% CI [42.8%, 61.1%]) rated technology risks as critical"
+# Purpose: Calculate proportion of VCs rating technology risk as critical with Wilson CI
 
-# ---- Setup ----
-suppressWarnings(suppressMessages({
-  required_pkgs <- c("psych","effectsize","pwr","vcd","naniar","lavaan","nnet","MASS","car")
-  for (p in required_pkgs) { if (!requireNamespace(p, quietly = TRUE)) { message(sprintf("Package '%s' not installed; attempting to proceed if not needed in this script.", p)) } }
-}))
+library(tidyverse)
+library(janitor)
+library(DescTools)
 
-# Load data (literal path to the attached file)
-data <- tryCatch({
-  read.csv("/mnt/data/survey_responses_anonymized_preliminary.csv", stringsAsFactors = FALSE, check.names = FALSE)
-}, error = function(e) {
-  stop("Could not read CSV at /mnt/data/survey_responses_anonymized_preliminary.csv: ", e)
-})
+raw <- read.csv("survey_responses_anonymized_preliminary.csv") %>% clean_names()
 
-# Convenience: treat common columns
-# Ensure key columns exist (Status, Progress)
-if (!("Status" %in% names(data))) stop("Column 'Status' not found.")
-if (!("Progress" %in% names(data))) stop("Column 'Progress' not found.")
+# Variable mapping
+COL_STAKEHOLDER <- "stakeholder"
+COL_TECH_RISK_CRIT <- "tech_risk_critical"  # Binary: 1=critical, 0=not
 
-# Clean subset similar to manuscript logic
-data_clean <- subset(data, Status == "IP Address" & suppressWarnings(as.numeric(Progress)) >= 10)
+df <- raw %>%
+  filter(status == "IP Address", as.numeric(progress) >= 10) %>%
+  mutate(
+    stakeholder = factor(stakeholder),
+    tech_risk_critical = as.integer(tech_risk_critical)
+  )
 
-risk_cols <- grep("^Q12\.13_", names(data), value = TRUE)[1:10]
-risk_items <- data[, risk_cols, drop = FALSE]
-risk_items_clean <- na.omit(apply(risk_items, 2, function(x) suppressWarnings(as.numeric(x))))
-if (!requireNamespace("psych", quietly = TRUE)) stop("Package 'psych' required.")
-pca_result <- psych::principal(risk_items_clean, nfactors = 3, rotate = "varimax")
-variance_explained <- sum(pca_result$values[1:3]) / sum(pca_result$values) * 100
-cat("Variance explained (3-factor):", round(variance_explained, 2), "%\n")
+# Filter for VCs only
+vc_data <- df %>% filter(stakeholder == "Venture Capital")
+
+# Calculate proportion and CI
+n_vc <- nrow(vc_data)
+n_critical <- sum(vc_data$tech_risk_critical, na.rm = TRUE)
+prop_critical <- n_critical / n_vc
+
+# Wilson CI
+ci <- BinomCI(n_critical, n_vc, conf.level = 0.95, method = "wilson")
+print(paste("VCs rating tech risk critical:", round(prop_critical * 100, 1), "%"))
+print(paste("95% CI: [", round(ci[,"lwr.ci"] * 100, 1), "%, ", round(ci[,"upr.ci"] * 100, 1), "%]", sep=""))
+# Expected: 52% (95% CI [42.8%, 61.1%])

@@ -1,30 +1,26 @@
-# File: 009_limited_partners_54_41pct.R
-# Purpose: Replicate the manuscript statistical test or descriptive statistic for this specific assertion.
-# Manuscript assertion: "limited partners (n=54, 4.1%)"
-# Notes: This script expects the CSV at: /mnt/data/survey_responses_anonymized_preliminary.csv
-#        Ensure required packages are installed (psych, effectsize, pwr, vcd, naniar, lavaan, nnet, MASS, car).
+# =============== Global Setup & Variable Mapping =================
+# Statistical Assertion: "Overall, 81% (95% CI [78.9%, 83.0%]) identified market readiness as a significant challenge"
+# Purpose: Calculate overall proportion identifying market readiness as significant barrier
 
-# ---- Setup ----
-suppressWarnings(suppressMessages({
-  required_pkgs <- c("psych","effectsize","pwr","vcd","naniar","lavaan","nnet","MASS","car")
-  for (p in required_pkgs) { if (!requireNamespace(p, quietly = TRUE)) { message(sprintf("Package '%s' not installed; attempting to proceed if not needed in this script.", p)) } }
-}))
+library(tidyverse)
+library(janitor)
+library(DescTools)
 
-# Load data (literal path to the attached file)
-data <- tryCatch({
-  read.csv("/mnt/data/survey_responses_anonymized_preliminary.csv", stringsAsFactors = FALSE, check.names = FALSE)
-}, error = function(e) {
-  stop("Could not read CSV at /mnt/data/survey_responses_anonymized_preliminary.csv: ", e)
-})
+raw <- read.csv("survey_responses_anonymized_preliminary.csv") %>% clean_names()
 
-# Convenience: treat common columns
-# Ensure key columns exist (Status, Progress)
-if (!("Status" %in% names(data))) stop("Column 'Status' not found.")
-if (!("Progress" %in% names(data))) stop("Column 'Progress' not found.")
+# Variable mapping
+COL_MARKET_READY_CRIT <- "market_readiness_critical"
 
-# Clean subset similar to manuscript logic
-data_clean <- subset(data, Status == "IP Address" & suppressWarnings(as.numeric(Progress)) >= 10)
+df <- raw %>%
+  filter(status == "IP Address", as.numeric(progress) >= 10) %>%
+  mutate(market_readiness_critical = as.integer(market_readiness_critical))
 
-lp_count <- sum(data$Q2.1 == "4" & data$Status == "IP Address", na.rm = TRUE)
-lp_pct <- (lp_count / nrow(data_clean)) * 100
-cat("LP count:", lp_count, " Percent:", round(lp_pct,2), "\n")
+n_total <- nrow(df)
+n_market_critical <- sum(df$market_readiness_critical, na.rm = TRUE)
+prop_market <- n_market_critical / n_total
+
+ci <- BinomCI(n_market_critical, n_total, conf.level = 0.95, method = "wilson")
+print(paste("Market readiness as barrier:", round(prop_market * 100, 1), "%"))
+print(paste("95% CI: [", round(ci[,"lwr.ci"] * 100, 1), "%, ", round(ci[,"upr.ci"] * 100, 1), "%]", sep=""))
+
+# Expected: 81% (95% CI [78.9%, 83.0%])
